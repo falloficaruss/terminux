@@ -1,6 +1,6 @@
-# Terminus (MVP Scaffold)
+# Terminux (MVP Scaffold)
 
-Terminus is a persistent AI memory layer around terminal workflows.
+Terminux is a persistent AI memory layer around terminal workflows.
 
 This scaffold includes:
 - Rust capture daemon (`daemon/`) for shipping command events.
@@ -24,10 +24,12 @@ uvicorn app.main:app --reload
 ```
 
 Environment variables (optional):
-- `TERMINUS_SQLITE_PATH` (default: `./data/terminus.db`)
-- `TERMINUS_QDRANT_URL` (default: `http://127.0.0.1:6333`)
-- `TERMINUS_QDRANT_ENABLED` (default: `true`)
-- `TERMINUS_API_URL` for CLI/daemon (default: `http://127.0.0.1:8000`)
+- `TERMINUX_SQLITE_PATH` (default: `./data/terminux.db`)
+- `TERMINUX_QDRANT_URL` (default: `http://127.0.0.1:6333`)
+- `TERMINUX_QDRANT_ENABLED` (default: `true`)
+- `TERMINUX_API_URL` for CLI/daemon (default: `http://127.0.0.1:8000`)
+
+Legacy `TERMINUS_*` env vars are still accepted for compatibility.
 
 ## 3) Build daemon
 
@@ -37,7 +39,7 @@ cargo build
 ```
 
 Binary path:
-- `daemon/target/debug/terminus-daemon`
+- `daemon/target/debug/terminux-daemon`
 
 ## 4) Use the CLI
 

@@ -988,7 +988,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "terminus-daemon"
+name = "terminux-daemon"
 version = "0.1.0"
 dependencies = [
  "chrono",

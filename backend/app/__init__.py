@@ -1,1 +1,1 @@
-"""Terminus backend package."""
+"""Terminux backend package."""

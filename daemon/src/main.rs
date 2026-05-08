@@ -9,7 +9,7 @@ use reqwest::blocking::Client;
 use serde::{Deserialize, Serialize};
 
 #[derive(Parser, Debug)]
-#[command(author, version, about = "Terminus capture daemon")]
+#[command(author, version, about = "Terminux capture daemon")]
 struct Cli {
     #[command(subcommand)]
     command: Commands,
@@ -17,7 +17,7 @@ struct Cli {
 
 #[derive(Subcommand, Debug)]
 enum Commands {
-    /// Emit one terminal event to the Terminus API
+    /// Emit one terminal event to the Terminux API
     Emit {
         #[arg(long)]
         command: String,
@@ -58,7 +58,9 @@ struct EventPayload {
 }
 
 fn default_api_url() -> String {
-    env::var("TERMINUS_API_URL").unwrap_or_else(|_| "http://127.0.0.1:8000".to_owned())
+    env::var("TERMINUX_API_URL")
+        .or_else(|_| env::var("TERMINUS_API_URL"))
+        .unwrap_or_else(|_| "http://127.0.0.1:8000".to_owned())
 }
 
 fn current_cwd() -> String {

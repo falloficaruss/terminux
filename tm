@@ -9,7 +9,7 @@ from typing import Any
 
 import httpx
 
-API_URL = os.getenv("TERMINUS_API_URL", "http://127.0.0.1:8000")
+API_URL = os.getenv("TERMINUX_API_URL", os.getenv("TERMINUS_API_URL", "http://127.0.0.1:8000"))
 
 
 def _request(method: str, path: str, **kwargs: Any) -> Any:
@@ -65,7 +65,7 @@ def cmd_ingest(args: argparse.Namespace) -> int:
 
 
 def build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(prog="tm", description="Terminus CLI")
+    parser = argparse.ArgumentParser(prog="tm", description="Terminux CLI")
     subparsers = parser.add_subparsers(dest="command", required=True)
 
     recall = subparsers.add_parser("recall", help="Recall historical issues and fixes")
@@ -87,7 +87,7 @@ def build_parser() -> argparse.ArgumentParser:
     preflight.add_argument("commands", nargs="*", help="Optional command chain")
     preflight.set_defaults(func=cmd_preflight)
 
-    ingest = subparsers.add_parser("ingest", help="Send a sample event to Terminus API")
+    ingest = subparsers.add_parser("ingest", help="Send a sample event to Terminux API")
     ingest.add_argument("command")
     ingest.add_argument("--cwd", default=os.getcwd())
     ingest.add_argument("--output", default="")

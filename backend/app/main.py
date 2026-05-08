@@ -25,7 +25,7 @@ from .schemas import (
 )
 from .vector_store import VectorStore
 
-app = FastAPI(title="Terminus Memory API", version="0.1.0")
+app = FastAPI(title="Terminux Memory API", version="0.1.0")
 store = Store(sqlite_path=settings.sqlite_path, session_gap_seconds=settings.session_gap_seconds)
 vector_store = VectorStore(settings)
 
