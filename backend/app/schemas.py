@@ -90,6 +90,8 @@ class HealthResponse(BaseModel):
     ok: bool
     qdrant_enabled: bool
     qdrant_ready: bool
+    embedding_backend: str
+    embedding_dim: int
     version: str
 
 

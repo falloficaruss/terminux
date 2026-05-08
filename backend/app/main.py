@@ -51,7 +51,14 @@ def _to_utc(dt: datetime | None) -> datetime:
 
 @app.get("/health", response_model=HealthResponse)
 def health() -> HealthResponse:
-    return HealthResponse(ok=True, qdrant_enabled=vector_store.enabled, qdrant_ready=vector_store.ready, version=app.version)
+    return HealthResponse(
+        ok=True,
+        qdrant_enabled=vector_store.enabled,
+        qdrant_ready=vector_store.ready,
+        embedding_backend=vector_store.embedding_backend,
+        embedding_dim=vector_store.embedding_dim,
+        version=app.version,
+    )
 
 
 @app.post("/v1/events", response_model=EventOut)
