@@ -1,5 +1,5 @@
 <p align="center">
-<img src="file:///home/falloficaruss/ChatGPT%20Image%20May%208,%202026,%2003_53_11%20PM.png">
+    <img src="assets/logo.png>
 </p>
 
 # Terminux (MVP Scaffold)
