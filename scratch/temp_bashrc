@@ -1,0 +1,3 @@
+# Minimal bashrc for testing
+PS1='> '
+source /home/falloficaruss/terminux/scripts/terminux_hook.bash

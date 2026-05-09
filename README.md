@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="assets/logo.png" alt="Terminux logo" width="220" />
+    <img src="assets/logo.png />
 </p>
 
 # Terminux (MVP Scaffold)
@@ -51,7 +51,6 @@ export TERMINUX_EMBEDDING_BACKEND=gemini
 export TERMINUX_GEMINI_API_KEY="your_google_ai_studio_key"
 ```
 
-Legacy `TERMINUS_*` env vars are still accepted for compatibility.
 
 ## 3) Build daemon
 
