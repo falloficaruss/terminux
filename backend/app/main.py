@@ -1,5 +1,5 @@
-from __future__ import annotations
-
+import logging
+from contextlib import asynccontextmanager
 from datetime import datetime, timezone
 
 from fastapi import FastAPI, HTTPException, Query
@@ -25,7 +25,25 @@ from .schemas import (
 )
 from .vector_store import VectorStore
 
-app = FastAPI(title="Terminux Memory API", version="0.1.0")
+logger = logging.getLogger(__name__)
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    # Startup: Check embedding backend
+    backend = vector_store.embedding_backend
+    if backend == "hash":
+        logger.warning(
+            "SUBOPTIMAL EMBEDDING MODE: Terminux is using 'hash' embeddings. "
+            "Semantic proximity will be disabled. "
+            "Set TERMINUX_GEMINI_API_KEY or configure Ollama for semantic search."
+        )
+    else:
+        logger.info("Terminux starting with '%s' embedding backend.", backend)
+    yield
+
+
+app = FastAPI(title="Terminux Memory API", version="0.1.0", lifespan=lifespan)
 store = Store(sqlite_path=settings.sqlite_path, session_gap_seconds=settings.session_gap_seconds)
 vector_store = VectorStore(settings)
 

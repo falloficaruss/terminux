@@ -34,8 +34,8 @@ class Settings:
     session_gap_seconds: int = int(_env("TERMINUX_SESSION_GAP_SECONDS", "TERMINUS_SESSION_GAP_SECONDS", "1200"))
     recall_default_limit: int = int(_env("TERMINUX_RECALL_DEFAULT_LIMIT", "TERMINUS_RECALL_DEFAULT_LIMIT", "5"))
 
-    embedding_backend: str = _env("TERMINUX_EMBEDDING_BACKEND", "TERMINUS_EMBEDDING_BACKEND", "hash")
-    embedding_dim: int = int(_env("TERMINUX_EMBEDDING_DIM", "TERMINUS_EMBEDDING_DIM", "128"))
+    embedding_backend: str = _env("TERMINUX_EMBEDDING_BACKEND", "TERMINUS_EMBEDDING_BACKEND", "gemini")
+    embedding_dim: int = int(_env("TERMINUX_EMBEDDING_DIM", "TERMINUS_EMBEDDING_DIM", "768"))
     embedding_timeout_seconds: float = float(
         _env("TERMINUX_EMBEDDING_TIMEOUT_SECONDS", "TERMINUS_EMBEDDING_TIMEOUT_SECONDS", "10")
     )
@@ -49,7 +49,18 @@ class Settings:
     gemini_embedding_model: str = _env(
         "TERMINUX_GEMINI_EMBEDDING_MODEL",
         "TERMINUS_GEMINI_EMBEDDING_MODEL",
-        "models/gemini-embedding-2",
+        "models/text-embedding-004",
+    )
+
+    ollama_api_base: str = _env(
+        "TERMINUX_OLLAMA_API_BASE",
+        "TERMINUS_OLLAMA_API_BASE",
+        "http://localhost:11434",
+    )
+    ollama_embedding_model: str = _env(
+        "TERMINUX_OLLAMA_EMBEDDING_MODEL",
+        "TERMINUS_OLLAMA_EMBEDDING_MODEL",
+        "nomic-embed-text",
     )
 
 
