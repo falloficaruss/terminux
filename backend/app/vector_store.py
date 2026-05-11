@@ -72,7 +72,7 @@ class VectorStore:
         except Exception as exc:  # pragma: no cover
             logger.warning("Vector upsert failed; continuing without vector index: %s", exc)
 
-    def search(self, query: str, limit: int) -> list[VectorHit]:
+    def search(self, query: str, limit: int, query_filter: Any = None) -> list[VectorHit]:
         if not self._enabled or not self._client:
             return []
 
@@ -83,6 +83,7 @@ class VectorStore:
                 result = self._client.query_points(
                     collection_name=self._cfg.qdrant_collection,
                     query=vector,
+                    query_filter=query_filter,
                     limit=limit,
                     with_payload=True,
                 )
@@ -91,6 +92,7 @@ class VectorStore:
                 points = self._client.search(
                     collection_name=self._cfg.qdrant_collection,
                     query_vector=vector,
+                    query_filter=query_filter,
                     limit=limit,
                     with_payload=True,
                 )
@@ -108,3 +110,22 @@ class VectorStore:
                 )
             )
         return hits
+
+    def find_similar_failure(self, command: str, cwd: str, threshold: float = 0.8) -> VectorHit | None:
+        if not self._enabled or not self._client:
+            return None
+
+        # Build filter for failures in the same directory
+        query_filter = models.Filter(
+            must=[
+                models.FieldCondition(key="cwd", match=models.MatchValue(value=cwd)),
+            ],
+            must_not=[
+                models.FieldCondition(key="exit_code", match=models.MatchValue(value=0)),
+            ]
+        )
+
+        hits = self.search(query=command, limit=1, query_filter=query_filter)
+        if hits and hits[0].score >= threshold:
+            return hits[0]
+        return None

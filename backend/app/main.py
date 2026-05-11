@@ -109,13 +109,26 @@ def ingest_event(payload: EventIn) -> EventOut:
             "session_id": session_id,
             "category": category,
             "command": payload.command,
+            "exit_code": payload.exit_code,
+            "cwd": payload.cwd,
             "summary": _event_to_summary(payload.command, redacted_output, root_cause),
             "timestamp": event_time.isoformat(),
         },
     )
 
     if payload.exit_code == 0:
-        failure = store.find_recent_failure_for_command(session_id=session_id, command=payload.command)
+        failure = None
+        
+        # 1. Try semantic match across sessions (if enabled)
+        if vector_store.enabled:
+            similar = vector_store.find_similar_failure(command=payload.command, cwd=payload.cwd)
+            if similar:
+                failure = store.get_event(int(similar.payload["event_id"]))
+        
+        # 2. Fallback to cross-session exact match (works even if vector store is disabled)
+        if failure is None:
+            failure = store.find_recent_failure_cross_session(cwd=payload.cwd, command=payload.command)
+
         if failure is not None and int(failure["id"]) != event_id:
             prior_root_cause = failure["root_cause"] or "unknown cause"
             summary = f"Recovered command '{payload.command}' after failure likely caused by {prior_root_cause}."

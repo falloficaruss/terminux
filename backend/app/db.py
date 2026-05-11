@@ -200,6 +200,22 @@ class Store:
             (session_id, command),
         ).fetchone()
 
+    def find_recent_failure_cross_session(self, cwd: str, command: str, hours_lookback: int = 48) -> sqlite3.Row | None:
+        cutoff = to_iso(utc_now() - timedelta(hours=hours_lookback))
+        return self.conn.execute(
+            """
+            SELECT *
+            FROM events
+            WHERE cwd = ?
+              AND command = ?
+              AND exit_code != 0
+              AND captured_at >= ?
+            ORDER BY id DESC
+            LIMIT 1
+            """,
+            (cwd, command, cutoff),
+        ).fetchone()
+
     def get_event(self, event_id: int) -> sqlite3.Row | None:
         return self.conn.execute("SELECT * FROM events WHERE id = ?", (event_id,)).fetchone()
 
