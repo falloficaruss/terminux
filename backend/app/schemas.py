@@ -36,6 +36,7 @@ class RecallItem(BaseModel):
 class RecallResponse(BaseModel):
     query: str
     results: list[RecallItem]
+    answer: str | None = None
 
 
 class ReplayStep(BaseModel):

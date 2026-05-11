@@ -23,6 +23,7 @@ from .schemas import (
     WeeklyCategoryStats,
     WeeklyReportResponse,
 )
+from .synthesis import SynthesisEngine
 from .vector_store import VectorStore
 
 logger = logging.getLogger(__name__)
@@ -46,6 +47,7 @@ async def lifespan(app: FastAPI):
 app = FastAPI(title="Terminux Memory API", version="0.1.0", lifespan=lifespan)
 store = Store(sqlite_path=settings.sqlite_path, session_gap_seconds=settings.session_gap_seconds)
 vector_store = VectorStore(settings)
+synthesis_engine = SynthesisEngine(settings)
 
 
 def _event_to_summary(command: str, output: str, root_cause: str | None) -> str:
@@ -177,7 +179,11 @@ def recall(
             if len(results) >= limit:
                 break
 
-    return RecallResponse(query=query, results=results)
+    answer = None
+    if results:
+        answer = synthesis_engine.synthesize_answer(query=query, items=results)
+
+    return RecallResponse(query=query, results=results, answer=answer)
 
 
 @app.get("/v1/replay-session", response_model=ReplaySessionResponse)

@@ -58,9 +58,7 @@ struct EventPayload {
 }
 
 fn default_api_url() -> String {
-    env::var("TERMINUX_API_URL")
-        .or_else(|_| env::var("TERMINUS_API_URL"))
-        .unwrap_or_else(|_| "http://127.0.0.1:8000".to_owned())
+    env::var("TERMINUX_API_URL").unwrap_or_else(|_| "http://127.0.0.1:8000".to_owned())
 }
 
 fn current_cwd() -> String {

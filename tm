@@ -9,7 +9,7 @@ from typing import Any
 
 import httpx
 
-API_URL = os.getenv("TERMINUX_API_URL", os.getenv("TERMINUS_API_URL", "http://127.0.0.1:8000"))
+API_URL = os.getenv("TERMINUX_API_URL", "http://127.0.0.1:8000")
 
 
 def _request(method: str, path: str, **kwargs: Any) -> Any:
@@ -23,6 +23,12 @@ def _request(method: str, path: str, **kwargs: Any) -> Any:
 
 def cmd_recall(args: argparse.Namespace) -> int:
     data = _request("GET", "/v1/recall", params={"query": args.query, "limit": args.limit})
+    answer = data.get("answer")
+    if answer:
+        print("\n=== SYNTHESIS ===")
+        print(answer)
+        print("=================\n")
+
     print(json.dumps(data, indent=2))
     return 0
 
