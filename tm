@@ -53,7 +53,26 @@ def cmd_replay_session(args: argparse.Namespace) -> int:
 def cmd_preflight(args: argparse.Namespace) -> int:
     payload = {"task": args.task, "commands": args.commands or []}
     data = _request("POST", "/v1/preflight", json=payload)
-    print(json.dumps(data, indent=2))
+    warnings = data.get("warnings", [])
+
+    if not warnings:
+        print("\033[32m✓ No historical warnings found.\033[0m")
+        return 0
+
+    severity_colors = {"high": "\033[31m", "medium": "\033[33m", "low": "\033[36m"}
+    reset = "\033[0m"
+    bold = "\033[1m"
+
+    print(f"\n{bold}=== PREFLIGHT WARNINGS ==={reset}")
+    for w in warnings:
+        sev = w.get("severity", "medium")
+        color = severity_colors.get(sev, "\033[33m")
+        label = sev.upper()
+        print(f"  {color}[{label}]{reset} {w['message']}")
+        event_ids = w.get("evidence_event_ids", [])
+        if event_ids:
+            print(f"         evidence: event_ids={event_ids}")
+    print(f"{bold}========================={reset}\n")
     return 0
 
 

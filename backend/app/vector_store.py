@@ -111,6 +111,18 @@ class VectorStore:
             )
         return hits
 
+    def search_failures(self, query: str, limit: int = 5) -> list[VectorHit]:
+        """Semantic search scoped to failure events only (exit_code != 0)."""
+        if not self._enabled or not self._client:
+            return []
+
+        query_filter = models.Filter(
+            must_not=[
+                models.FieldCondition(key="exit_code", match=models.MatchValue(value=0)),
+            ]
+        )
+        return self.search(query=query, limit=limit, query_filter=query_filter)
+
     def find_similar_failure(self, command: str, project_root: str, threshold: float = 0.8) -> VectorHit | None:
         if not self._enabled or not self._client:
             return None

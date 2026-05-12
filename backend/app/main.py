@@ -1,6 +1,7 @@
 import logging
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone
+from typing import Any
 
 from fastapi import FastAPI, HTTPException, Query
 
@@ -250,7 +251,58 @@ def replay_session(
 
 @app.post("/v1/preflight", response_model=PreflightResponse)
 def preflight(payload: PreflightRequest) -> PreflightResponse:
-    warnings = store.preflight_warnings(task=payload.task, commands=payload.commands)
+    terms = [payload.task, *payload.commands]
+    warnings: list[dict[str, Any]] = []
+    seen_event_ids: set[int] = set()
+    terms_with_semantic_hits: set[str] = set()
+
+    # 1. Semantic search for each term (failures only)
+    for term in terms:
+        hits = vector_store.search_failures(query=term, limit=3)
+        relevant = [h for h in hits if h.score >= 0.45]
+        if not relevant:
+            continue
+
+        terms_with_semantic_hits.add(term)
+        evidence_ids = []
+        for hit in relevant:
+            eid = int(hit.payload.get("event_id", hit.point_id))
+            if eid in seen_event_ids:
+                continue
+            seen_event_ids.add(eid)
+            evidence_ids.append(eid)
+
+        if not evidence_ids:
+            continue
+
+        best_score = max(h.score for h in relevant)
+        if best_score >= 0.75:
+            severity = "high"
+        elif best_score >= 0.6:
+            severity = "medium"
+        else:
+            severity = "low"
+
+        # Use the best hit's payload for the message
+        best_hit = max(relevant, key=lambda h: h.score)
+        root_cause = best_hit.payload.get("root_cause") or best_hit.payload.get("summary") or "prior failures detected"
+        warnings.append({
+            "severity": severity,
+            "message": f"Semantically related failures found for '{term}': {root_cause}",
+            "evidence_event_ids": evidence_ids,
+        })
+
+    # 2. SQLite LIKE fallback for terms that had no semantic hits
+    fallback_terms = [t for t in terms if t not in terms_with_semantic_hits]
+    if fallback_terms:
+        like_warnings = store.preflight_warnings(task=fallback_terms[0], commands=fallback_terms[1:])
+        for w in like_warnings:
+            w_ids = set(w.get("evidence_event_ids", []))
+            if not w_ids - seen_event_ids:
+                continue  # Already covered by semantic hits
+            seen_event_ids.update(w_ids)
+            warnings.append(w)
+
     return PreflightResponse(task=payload.task, warnings=warnings)
 
 
