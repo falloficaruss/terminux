@@ -111,14 +111,14 @@ class VectorStore:
             )
         return hits
 
-    def find_similar_failure(self, command: str, cwd: str, threshold: float = 0.8) -> VectorHit | None:
+    def find_similar_failure(self, command: str, project_root: str, threshold: float = 0.8) -> VectorHit | None:
         if not self._enabled or not self._client:
             return None
 
-        # Build filter for failures in the same directory
+        # Build filter for failures in the same project
         query_filter = models.Filter(
             must=[
-                models.FieldCondition(key="cwd", match=models.MatchValue(value=cwd)),
+                models.FieldCondition(key="project_root", match=models.MatchValue(value=project_root)),
             ],
             must_not=[
                 models.FieldCondition(key="exit_code", match=models.MatchValue(value=0)),

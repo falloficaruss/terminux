@@ -6,7 +6,7 @@ from fastapi import FastAPI, HTTPException, Query
 
 from .classifier import classify_event, likely_root_cause
 from .config import settings
-from .db import Store, parse_iso, utc_now
+from .db import Store, find_project_root, parse_iso, utc_now
 from .redaction import redact_environment, redact_sensitive_text
 from .schemas import (
     EventIn,
@@ -89,12 +89,14 @@ def ingest_event(payload: EventIn) -> EventOut:
     category = classify_event(payload.command, redacted_output)
     root_cause = likely_root_cause(redacted_output) if payload.exit_code != 0 else None
 
+    project_root = find_project_root(payload.cwd)
     event_id, session_id = store.add_event(
         command=payload.command,
         output=redacted_output,
         exit_code=payload.exit_code,
         duration_ms=payload.duration_ms,
         cwd=payload.cwd,
+        project_root=project_root,
         category=category,
         root_cause=root_cause,
         event_time=event_time,
@@ -111,6 +113,7 @@ def ingest_event(payload: EventIn) -> EventOut:
             "command": payload.command,
             "exit_code": payload.exit_code,
             "cwd": payload.cwd,
+            "project_root": project_root,
             "summary": _event_to_summary(payload.command, redacted_output, root_cause),
             "timestamp": event_time.isoformat(),
         },
@@ -121,13 +124,13 @@ def ingest_event(payload: EventIn) -> EventOut:
         
         # 1. Try semantic match across sessions (if enabled)
         if vector_store.enabled:
-            similar = vector_store.find_similar_failure(command=payload.command, cwd=payload.cwd)
+            similar = vector_store.find_similar_failure(command=payload.command, project_root=project_root)
             if similar:
                 failure = store.get_event(int(similar.payload["event_id"]))
         
         # 2. Fallback to cross-session exact match (works even if vector store is disabled)
         if failure is None:
-            failure = store.find_recent_failure_cross_session(cwd=payload.cwd, command=payload.command)
+            failure = store.find_recent_failure_cross_session(project_root=project_root, command=payload.command)
 
         if failure is not None and int(failure["id"]) != event_id:
             prior_root_cause = failure["root_cause"] or "unknown cause"

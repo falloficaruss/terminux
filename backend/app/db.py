@@ -21,6 +21,23 @@ def parse_iso(value: str) -> datetime:
     return datetime.fromisoformat(value)
 
 
+def find_project_root(path: str) -> str:
+    try:
+        current = Path(path).resolve()
+        for parent in [current, *current.parents]:
+            # Check for common project markers
+            if (parent / ".git").exists() or \
+               (parent / ".hg").exists() or \
+               (parent / "package.json").exists() or \
+               (parent / "pyproject.toml").exists() or \
+               (parent / "go.mod").exists() or \
+               (parent / "Cargo.toml").exists():
+                return str(parent)
+        return str(current)
+    except Exception:
+        return path
+
+
 class Store:
     def __init__(self, sqlite_path: str, session_gap_seconds: int) -> None:
         self.sqlite_path = sqlite_path
@@ -36,6 +53,7 @@ class Store:
             CREATE TABLE IF NOT EXISTS sessions (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 cwd TEXT NOT NULL,
+                project_root TEXT,
                 started_at TEXT NOT NULL,
                 last_event_at TEXT NOT NULL
             );
@@ -48,13 +66,27 @@ class Store:
                 exit_code INTEGER NOT NULL,
                 duration_ms INTEGER,
                 cwd TEXT NOT NULL,
+                project_root TEXT,
                 category TEXT NOT NULL,
                 root_cause TEXT,
                 captured_at TEXT NOT NULL,
                 env_json TEXT,
                 FOREIGN KEY(session_id) REFERENCES sessions(id)
             );
+            """
+        )
+        # Migration: Add project_root if it doesn't exist
+        try:
+            self.conn.execute("ALTER TABLE sessions ADD COLUMN project_root TEXT")
+        except sqlite3.OperationalError:
+            pass # Already exists
+        try:
+            self.conn.execute("ALTER TABLE events ADD COLUMN project_root TEXT")
+        except sqlite3.OperationalError:
+            pass # Already exists
 
+        self.conn.executescript(
+            """
             CREATE TABLE IF NOT EXISTS failure_fixes (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 session_id INTEGER NOT NULL,
@@ -74,17 +106,18 @@ class Store:
             """
         )
         self.conn.commit()
+        self.conn.commit()
 
-    def _find_open_session(self, cwd: str, event_time: datetime) -> int | None:
+    def _find_open_session(self, project_root: str, event_time: datetime) -> int | None:
         row = self.conn.execute(
             """
             SELECT id, last_event_at
             FROM sessions
-            WHERE cwd = ?
+            WHERE project_root = ?
             ORDER BY last_event_at DESC
             LIMIT 1
             """,
-            (cwd,),
+            (project_root,),
         ).fetchone()
 
         if row is None:
@@ -95,13 +128,13 @@ class Store:
             return int(row["id"])
         return None
 
-    def _create_session(self, cwd: str, event_time: datetime) -> int:
+    def _create_session(self, cwd: str, project_root: str, event_time: datetime) -> int:
         cursor = self.conn.execute(
             """
-            INSERT INTO sessions (cwd, started_at, last_event_at)
-            VALUES (?, ?, ?)
+            INSERT INTO sessions (cwd, project_root, started_at, last_event_at)
+            VALUES (?, ?, ?, ?)
             """,
-            (cwd, to_iso(event_time), to_iso(event_time)),
+            (cwd, project_root, to_iso(event_time), to_iso(event_time)),
         )
         self.conn.commit()
         return int(cursor.lastrowid)
@@ -120,14 +153,15 @@ class Store:
         exit_code: int,
         duration_ms: int | None,
         cwd: str,
+        project_root: str,
         category: str,
         root_cause: str | None,
         event_time: datetime,
         env: dict[str, str] | None,
     ) -> tuple[int, int]:
-        session_id = self._find_open_session(cwd, event_time)
+        session_id = self._find_open_session(project_root, event_time)
         if session_id is None:
-            session_id = self._create_session(cwd, event_time)
+            session_id = self._create_session(cwd, project_root, event_time)
         else:
             self._touch_session(session_id, event_time)
 
@@ -140,11 +174,12 @@ class Store:
                 exit_code,
                 duration_ms,
                 cwd,
+                project_root,
                 category,
                 root_cause,
                 captured_at,
                 env_json
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 session_id,
@@ -153,6 +188,7 @@ class Store:
                 exit_code,
                 duration_ms,
                 cwd,
+                project_root,
                 category,
                 root_cause,
                 to_iso(event_time),
@@ -200,20 +236,20 @@ class Store:
             (session_id, command),
         ).fetchone()
 
-    def find_recent_failure_cross_session(self, cwd: str, command: str, hours_lookback: int = 48) -> sqlite3.Row | None:
+    def find_recent_failure_cross_session(self, project_root: str, command: str, hours_lookback: int = 48) -> sqlite3.Row | None:
         cutoff = to_iso(utc_now() - timedelta(hours=hours_lookback))
         return self.conn.execute(
             """
             SELECT *
             FROM events
-            WHERE cwd = ?
+            WHERE project_root = ?
               AND command = ?
               AND exit_code != 0
               AND captured_at >= ?
             ORDER BY id DESC
             LIMIT 1
             """,
-            (cwd, command, cutoff),
+            (project_root, command, cutoff),
         ).fetchone()
 
     def get_event(self, event_id: int) -> sqlite3.Row | None:
