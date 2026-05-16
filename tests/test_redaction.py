@@ -78,6 +78,57 @@ class TestRedactSensitiveText:
         assert REDACTED_MARKER in result
         assert "sk-" not in result
 
+    # -- Pattern 5: IP Addresses --
+    @pytest.mark.parametrize(
+        "text",
+        [
+            "Server IP is 192.168.1.1",
+            "connected to 10.0.0.255 on port 80",
+        ],
+    )
+    def test_ip_address_redacted(self, text: str) -> None:
+        result = redact_sensitive_text(text)
+        assert REDACTED_MARKER in result
+        assert "192" not in result and "10." not in result
+
+    # -- Pattern 6: Database Connection Strings --
+    @pytest.mark.parametrize(
+        "text",
+        [
+            "postgresql://dbuser:secretpass@localhost/mydb",
+            "mysql://root:root123@127.0.0.1:3306/test",
+        ],
+    )
+    def test_db_connection_string_redacted(self, text: str) -> None:
+        result = redact_sensitive_text(text)
+        assert REDACTED_MARKER in result
+        assert "secretpass" not in result and "root123" not in result
+
+    # -- Pattern 7: AWS Access Keys --
+    @pytest.mark.parametrize(
+        "text",
+        [
+            "aws_access_key_id = AKIAIOSFODNN7EXAMPLE",
+            "AKIAIOSFODNN7EXAMPLE",
+        ],
+    )
+    def test_aws_access_key_redacted(self, text: str) -> None:
+        result = redact_sensitive_text(text)
+        assert REDACTED_MARKER in result
+        assert "AKIAIOSFODNN7EXAMPLE" not in result
+
+    # -- Pattern 8: JWT Tokens --
+    @pytest.mark.parametrize(
+        "text",
+        [
+            "token: eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiIxMjM0NTY3ODkwIiwibmFtZSI6IkpvaG4gRG9lIiwiaWF0IjoxNTE2MjM5MDIyfQ.SflKxwRJSMeKKF2QT4fwpMeJf36POk6yJV_adQssw5c",
+        ],
+    )
+    def test_jwt_token_redacted(self, text: str) -> None:
+        result = redact_sensitive_text(text)
+        assert REDACTED_MARKER in result
+        assert "eyJhbGciOi" not in result
+
     # -- Safe text should survive unmodified --
     @pytest.mark.parametrize(
         "text",

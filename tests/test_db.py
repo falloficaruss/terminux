@@ -15,10 +15,11 @@ from app.db import Store, find_project_root, to_iso, parse_iso, utc_now
 
 # ---------------------------------------------------------------------------
 # Helpers
-# ---------------------------------------------------------------------------
+BASE_TIME = utc_now()
+
 def _ts(minutes_offset: int = 0, base: datetime | None = None) -> datetime:
     """Return a UTC datetime offset by *minutes_offset* from *base*."""
-    base = base or datetime(2026, 5, 14, 12, 0, 0, tzinfo=timezone.utc)
+    base = base or BASE_TIME
     return base + timedelta(minutes=minutes_offset)
 
 

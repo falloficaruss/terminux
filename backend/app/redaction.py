@@ -7,6 +7,10 @@ REDACTION_PATTERNS = [
     re.compile(r"(?i)authorization:\s*bearer\s+[a-z0-9._-]+"),
     re.compile(r"\bghp_[A-Za-z0-9]{20,}\b"),
     re.compile(r"\bsk-[A-Za-z0-9]{20,}\b"),
+    re.compile(r"\b(?:\d{1,3}\.){3}\d{1,3}\b"),
+    re.compile(r"(?i)[a-z0-9+.-]+://[^:\s\"']+:[^@\s\"']+@[^\s\"']+"),
+    re.compile(r"\b(?:AKIA|ASIA|AGPA|AIDA|AROA|AIPA|ANPA|ANVA)[A-Z0-9]{16}\b"),
+    re.compile(r"\beyJ[a-zA-Z0-9_-]+\.[a-zA-Z0-9_-]+\.[a-zA-Z0-9_-]+\b"),
 ]
 
 
