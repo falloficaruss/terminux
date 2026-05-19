@@ -108,21 +108,24 @@ class TestClassifyEventEdgeCases:
         assert classify_event("ip addr show", "") == "networking"
 
     def test_compose_without_docker_matches_container(self) -> None:
-        """'compose' alone triggers 'container', which may be wrong for
-        e.g. 'docker compose' vs 'compose email'. Documents the current regex."""
-        assert classify_event("compose an email", "") == "container"
+        """Verify 'compose' alone is not classified as container unless followed by subcommands."""
+        assert classify_event("compose an email", "") == "general"
+        assert classify_event("compose up", "") == "container"
+        assert classify_event("docker compose down", "") == "container"
 
     def test_uv_word_boundary_false_positive(self) -> None:
-        """The \\buv\\b pattern is meant for the Python tool 'uv' but will match
-        any bare 'uv' token, e.g. 'uv light'.  Documents the ambiguity."""
-        assert classify_event("check uv levels", "") == "python-dev"
+        """Verify 'uv' is not classified as python-dev unless it's the tool itself."""
+        assert classify_event("check uv levels", "") == "general"
+        assert classify_event("uv pip install requests", "") == "python-dev"
+        assert classify_event("uv run script.py", "") == "python-dev"
 
     def test_token_in_auth_matches_broadly(self) -> None:
-        """The auth category includes 'token' without word boundaries.
-        Any command/output containing the substring 'token' triggers auth."""
-        assert classify_event("generate token", "") == "auth"
-        # Even harmless references:
-        assert classify_event("echo token_name", "") == "auth"
+        """Verify 'token' only triggers auth in explicit credential/auth contexts."""
+        assert classify_event("generate token", "") == "general"
+        assert classify_event("echo token_name", "") == "general"
+        assert classify_event("export access_token=secret", "") == "auth"
+        assert classify_event("api_token: sk-123", "") == "auth"
+        assert classify_event("some-cmd", "error: token expired") == "auth"
 
     def test_service_keyword_false_positive(self) -> None:
         """'service' without context matches the service category.

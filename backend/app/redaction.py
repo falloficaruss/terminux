@@ -4,6 +4,7 @@ import re
 
 REDACTION_PATTERNS = [
     re.compile(r"(?i)(api[_-]?key|token|secret|password)\s*[=:]\s*[^\s\"']+"),
+    re.compile(r"(?i)(api[_-]?key|token|secret|password)\s*[=:]\s*['\"][^'\"]+['\"]"),
     re.compile(r"(?i)authorization:\s*bearer\s+[a-z0-9._-]+"),
     re.compile(r"\bghp_[A-Za-z0-9]{20,}\b"),
     re.compile(r"\bsk-[A-Za-z0-9]{20,}\b"),
@@ -11,6 +12,9 @@ REDACTION_PATTERNS = [
     re.compile(r"(?i)[a-z0-9+.-]+://[^:\s\"']+:[^@\s\"']+@[^\s\"']+"),
     re.compile(r"\b(?:AKIA|ASIA|AGPA|AIDA|AROA|AIPA|ANPA|ANVA)[A-Z0-9]{16}\b"),
     re.compile(r"\beyJ[a-zA-Z0-9_-]+\.[a-zA-Z0-9_-]+\.[a-zA-Z0-9_-]+\b"),
+    re.compile(r"(?s)-----BEGIN [A-Z ]+ PRIVATE KEY-----.+?-----END [A-Z ]+ PRIVATE KEY-----"),
+    re.compile(r"https://hooks\.slack\.com/services/[A-Za-z0-9_]+/[A-Za-z0-9_]+/[A-Za-z0-9_]+"),
+    re.compile(r"https://discord(?:app)?\.com/api/webhooks/\d+/[A-Za-z0-9_-]+"),
 ]
 
 

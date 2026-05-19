@@ -274,6 +274,32 @@ def cmd_ingest(args: argparse.Namespace) -> int:
     return 0
 
 
+# ── status ────────────────────────────────────────────────────────
+def cmd_status(args: argparse.Namespace) -> int:
+    try:
+        data = _request("GET", "/health")
+    except Exception as exc:
+        console.print(f"[bold red]✗ Failed to connect to Terminux API:[/bold red] {exc}")
+        return 1
+
+    if args.json:
+        print(json.dumps(data, indent=2))
+        return 0
+
+    console.print()
+    console.print(Panel(
+        f"[bold]API Status:[/bold]            [green]✓ {data.get('status', 'ok')}[/green]\n"
+        f"[bold]SQLite DB Status:[/bold]      [green]✓ Ready[/green] ({'Connected' if data.get('db_ready') else 'Error'})\n"
+        f"[bold]Qdrant Vector DB:[/bold]      {'[green]✓ Connected[/green]' if data.get('qdrant_ready') else '[yellow]⚠ Disabled/Disconnected[/yellow]'}\n"
+        f"[bold]Active Embeddings:[/bold]     [cyan]{data.get('embedding_backend')}[/cyan] (dim={data.get('embedding_dim')})\n"
+        f"[bold]Terminux Version:[/bold]      {data.get('version', '0.1.0')}",
+        title="[bold cyan]Terminux System Status[/bold cyan]",
+        border_style="cyan",
+        expand=False
+    ))
+    return 0
+
+
 # ── argument parser ───────────────────────────────────────────────
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="tm", description="Terminux CLI")
@@ -310,6 +336,10 @@ def build_parser() -> argparse.ArgumentParser:
     ingest.add_argument("--duration-ms", type=int)
     ingest.add_argument("--json", action="store_true", help="Output raw JSON")
     ingest.set_defaults(func=cmd_ingest)
+
+    status = subparsers.add_parser("status", help="Check backend service health and active model configurations")
+    status.add_argument("--json", action="store_true", help="Output raw JSON")
+    status.set_defaults(func=cmd_status)
 
     return parser
 

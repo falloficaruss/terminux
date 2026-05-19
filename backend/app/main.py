@@ -74,6 +74,7 @@ def _to_utc(dt: datetime | None) -> datetime:
 def health() -> HealthResponse:
     return HealthResponse(
         ok=True,
+        db_ready=store.is_ready(),
         qdrant_enabled=vector_store.enabled,
         qdrant_ready=vector_store.ready,
         embedding_backend=vector_store.embedding_backend,
@@ -85,14 +86,15 @@ def health() -> HealthResponse:
 @app.post("/v1/events", response_model=EventOut)
 def ingest_event(payload: EventIn) -> EventOut:
     event_time = _to_utc(payload.timestamp)
+    redacted_command = redact_sensitive_text(payload.command or "")
     redacted_output = redact_sensitive_text(payload.output or "")
     redacted_env = redact_environment(payload.env)
-    category = classify_event(payload.command, redacted_output)
+    category = classify_event(redacted_command, redacted_output)
     root_cause = likely_root_cause(redacted_output) if payload.exit_code != 0 else None
 
     project_root = find_project_root(payload.cwd)
     event_id, session_id = store.add_event(
-        command=payload.command,
+        command=redacted_command,
         output=redacted_output,
         exit_code=payload.exit_code,
         duration_ms=payload.duration_ms,
@@ -106,16 +108,16 @@ def ingest_event(payload: EventIn) -> EventOut:
 
     vector_store.upsert_event_memory(
         event_id=event_id,
-        text=f"{payload.command}\n{redacted_output}\n{category}\n{root_cause or ''}",
+        text=f"{redacted_command}\n{redacted_output}\n{category}\n{root_cause or ''}",
         payload={
             "event_id": event_id,
             "session_id": session_id,
             "category": category,
-            "command": payload.command,
+            "command": redacted_command,
             "exit_code": payload.exit_code,
             "cwd": payload.cwd,
             "project_root": project_root,
-            "summary": _event_to_summary(payload.command, redacted_output, root_cause),
+            "summary": _event_to_summary(redacted_command, redacted_output, root_cause),
             "timestamp": event_time.isoformat(),
         },
     )

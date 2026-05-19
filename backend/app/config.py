@@ -48,7 +48,7 @@ class Settings:
     )
     gemini_embedding_model: str = os.getenv(
         "TERMINUX_GEMINI_EMBEDDING_MODEL",
-        "models/text-embedding-004",
+        "models/gemini-embedding-001",
     )
     gemini_generative_model: str = os.getenv(
         "TERMINUX_GEMINI_GENERATIVE_MODEL",

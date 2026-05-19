@@ -47,6 +47,13 @@ class Store:
         self.conn.row_factory = sqlite3.Row
         self._init_schema()
 
+    def is_ready(self) -> bool:
+        try:
+            self.conn.execute("SELECT 1")
+            return True
+        except Exception:
+            return False
+
     def _init_schema(self) -> None:
         self.conn.executescript(
             """

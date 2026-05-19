@@ -67,7 +67,7 @@ class VectorStore:
 
         try:
             vector = self._embedder.embed_text(text)
-            point = models.PointStruct(id=str(event_id), vector=vector, payload=payload)
+            point = models.PointStruct(id=int(event_id), vector=vector, payload=payload)
             self._client.upsert(collection_name=self._cfg.qdrant_collection, points=[point], wait=False)
         except Exception as exc:  # pragma: no cover
             logger.warning("Vector upsert failed; continuing without vector index: %s", exc)

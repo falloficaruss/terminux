@@ -129,6 +129,47 @@ class TestRedactSensitiveText:
         assert REDACTED_MARKER in result
         assert "eyJhbGciOi" not in result
 
+    # -- Pattern 9: SSH Private Keys --
+    def test_ssh_private_key_redacted(self) -> None:
+        key = (
+            "-----BEGIN OPENSSH PRIVATE KEY-----\n"
+            "b3BlbnNzaC1rZXktdjEAAAAABG5vbmUAAAAEbm9uZQAAAAAAAAABAAAAMwAAAAtzc2gtcn\n"
+            "cHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcA==\n"
+            "-----END OPENSSH PRIVATE KEY-----"
+        )
+        result = redact_sensitive_text(key)
+        assert REDACTED_MARKER in result
+        assert "b3BlbnNzaC" not in result
+
+    # -- Pattern 10: Slack Webhooks --
+    def test_slack_webhook_redacted(self) -> None:
+        webhook = "https://hooks.slack.com/services/T012ABC34/B012DEF34/abc123xyz456"
+        result = redact_sensitive_text(webhook)
+        assert REDACTED_MARKER in result
+        assert "T012ABC34" not in result
+
+    # -- Pattern 11: Discord Webhooks --
+    def test_discord_webhook_redacted(self) -> None:
+        webhook = "https://discord.com/api/webhooks/1234567890/abc123xyz_DEF-ghi"
+        result = redact_sensitive_text(webhook)
+        assert REDACTED_MARKER in result
+        assert "1234567890" not in result
+
+    # -- Pattern 12: Quoted Secret Assignments --
+    @pytest.mark.parametrize(
+        "text",
+        [
+            "password = 'my_secret_password'",
+            "secret: \"another_secret_val\"",
+            "API_KEY = \"my-api-key-123\"",
+        ]
+    )
+    def test_quoted_secret_assignment_redacted(self, text: str) -> None:
+        result = redact_sensitive_text(text)
+        assert REDACTED_MARKER in result
+        assert "my_secret_password" not in result
+        assert "another_secret_val" not in result
+
     # -- Safe text should survive unmodified --
     @pytest.mark.parametrize(
         "text",

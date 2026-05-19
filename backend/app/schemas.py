@@ -89,6 +89,7 @@ class WeeklyReportResponse(BaseModel):
 
 class HealthResponse(BaseModel):
     ok: bool
+    db_ready: bool
     qdrant_enabled: bool
     qdrant_ready: bool
     embedding_backend: str

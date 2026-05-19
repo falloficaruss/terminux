@@ -107,8 +107,8 @@ class EmbeddingEngine:
         if not model.startswith("models/"):
             model = f"models/{model}"
 
-        url = f"{self._cfg.gemini_api_base.rstrip('/')}/{model}:embedContent"
-        headers = {"x-goog-api-key": self._cfg.gemini_api_key, "Content-Type": "application/json"}
+        url = f"{self._cfg.gemini_api_base.rstrip('/')}/{model}:embedContent?key={self._cfg.gemini_api_key}"
+        headers = {"Content-Type": "application/json"}
 
         payloads = [
             {
