@@ -116,8 +116,10 @@ class EmbeddingEngine:
                 "outputDimensionality": self._cfg.embedding_dim,
             },
             {
+                "content": {"parts": [{"text": text}]},
+            },
+            {
                 "contents": [{"parts": [{"text": text}]}],
-                "outputDimensionality": self._cfg.embedding_dim,
             },
         ]
 
