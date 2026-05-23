@@ -26,6 +26,19 @@ if ! command -v terminux-daemon >/dev/null 2>&1; then
   return 0
 fi
 
+# Auto-start the background daemon if not already running
+__terminux_pidfile="${HOME}/.terminux/daemon.pid"
+__terminux_start_daemon() {
+  if [[ -f "$__terminux_pidfile" ]] && kill -0 "$(cat "$__terminux_pidfile" 2>/dev/null)" 2>/dev/null; then
+    return 0  # Already running
+  fi
+  mkdir -p "${HOME}/.terminux"
+  nohup terminux-daemon daemon >/dev/null 2>&1 &
+  echo $! > "$__terminux_pidfile"
+  disown 2>/dev/null
+}
+__terminux_start_daemon
+
 __terminux_active=0
 __terminux_started_at=0
 __terminux_last_offset=0
