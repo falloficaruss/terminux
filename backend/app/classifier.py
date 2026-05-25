@@ -20,7 +20,7 @@ CATEGORY_PATTERNS: dict[str, list[str]] = {
         r"\bpython\b",
         r"\bpoetry\b",
         r"\buv\s+(?:pip|run|sync|lock|add|remove|venv|tool|init|tree)\b",
-        r"^uv\b",
+        r"^uv\b(?!\s+(?:index|rays?|levels?|light|map|radiation)\b)",
     ],
     "package-management": [r"\bapt\b", r"\byum\b", r"\bpip\b", r"\bnpm\b", r"\bpnpm\b"],
     "gpu": [r"\bnvidia\b", r"\bcuda\b", r"\brocm\b"],

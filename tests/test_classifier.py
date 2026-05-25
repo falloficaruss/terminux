@@ -116,8 +116,12 @@ class TestClassifyEventEdgeCases:
     def test_uv_word_boundary_false_positive(self) -> None:
         """Verify 'uv' is not classified as python-dev unless it's the tool itself."""
         assert classify_event("check uv levels", "") == "general"
+        assert classify_event("uv levels", "") == "general"
+        assert classify_event("uv index", "") == "general"
+        assert classify_event("uv rays", "") == "general"
         assert classify_event("uv pip install requests", "") == "python-dev"
         assert classify_event("uv run script.py", "") == "python-dev"
+        assert classify_event("uv", "") == "python-dev"
 
     def test_token_in_auth_matches_broadly(self) -> None:
         """Verify 'token' only triggers auth in explicit credential/auth contexts."""
