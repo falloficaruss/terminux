@@ -10,6 +10,8 @@ from .config import settings
 from .db import Store, find_project_root, parse_iso, utc_now
 from .redaction import redact_environment, redact_sensitive_text
 from .schemas import (
+    CorrectionRequest,
+    CorrectionResponse,
     EventIn,
     EventOut,
     HealthResponse,
@@ -90,7 +92,7 @@ def ingest_event(payload: EventIn) -> EventOut:
     redacted_output = redact_sensitive_text(payload.output or "")
     redacted_env = redact_environment(payload.env)
     category = classify_event(redacted_command, redacted_output)
-    root_cause = likely_root_cause(redacted_output) if payload.exit_code != 0 else None
+    root_cause, root_cause_confidence = likely_root_cause(redacted_output) if payload.exit_code != 0 else (None, None)
 
     project_root = find_project_root(payload.cwd)
     event_id, session_id = store.add_event(
@@ -102,6 +104,7 @@ def ingest_event(payload: EventIn) -> EventOut:
         project_root=project_root,
         category=category,
         root_cause=root_cause,
+        root_cause_confidence=root_cause_confidence,
         event_time=event_time,
         env=redacted_env,
     )
@@ -117,6 +120,8 @@ def ingest_event(payload: EventIn) -> EventOut:
             "exit_code": payload.exit_code,
             "cwd": payload.cwd,
             "project_root": project_root,
+            "root_cause": root_cause,
+            "root_cause_confidence": root_cause_confidence,
             "summary": _event_to_summary(redacted_command, redacted_output, root_cause),
             "timestamp": event_time.isoformat(),
         },
@@ -146,6 +151,41 @@ def ingest_event(payload: EventIn) -> EventOut:
             )
 
     return EventOut(event_id=event_id, session_id=session_id, category=category, captured_at=event_time)
+
+
+@app.patch("/v1/events/{event_id}/correction", response_model=CorrectionResponse)
+def correct_event(event_id: int, correction: CorrectionRequest) -> CorrectionResponse:
+    if correction.category is None and correction.root_cause is None:
+        raise HTTPException(status_code=400, detail="Provide at least one of: category, root_cause")
+
+    updated = store.update_event_correction(
+        event_id=event_id,
+        category=correction.category,
+        root_cause=correction.root_cause,
+    )
+    if updated is None:
+        raise HTTPException(status_code=404, detail=f"Event {event_id} not found")
+
+    fields: dict[str, Any] = {}
+    changed: list[str] = []
+    if correction.category is not None:
+        fields["category"] = correction.category
+        changed.append(f"category → {correction.category}")
+    if correction.root_cause is not None:
+        fields["root_cause"] = correction.root_cause
+        changed.append(f"root_cause → {correction.root_cause}")
+
+    if fields:
+        vector_store.set_payload_fields(event_id, fields)
+
+    message = f"Corrected event {event_id}: {', '.join(changed)}" if changed else "No changes applied"
+    return CorrectionResponse(
+        event_id=int(updated["id"]),
+        session_id=int(updated["session_id"]),
+        category=updated["category"],
+        root_cause=updated["root_cause"],
+        message=message,
+    )
 
 
 @app.get("/v1/recall", response_model=RecallResponse)

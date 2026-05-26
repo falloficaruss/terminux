@@ -48,18 +48,18 @@ def classify_event(command: str, output: str) -> str:
     return "general"
 
 
-def likely_root_cause(output: str) -> str | None:
+def likely_root_cause(output: str) -> tuple[str | None, str]:
     lowered = output.lower()
     if "address already in use" in lowered or "port is already allocated" in lowered:
-        return "port conflict"
+        return "port conflict", "high"
     if "permission denied" in lowered:
-        return "permission issue"
+        return "permission issue", "high"
     if "connection refused" in lowered:
-        return "service unavailable"
+        return "service unavailable", "high"
     if "module not found" in lowered or "no module named" in lowered:
-        return "missing dependency"
+        return "missing dependency", "high"
     if "authentication" in lowered or "unauthorized" in lowered:
-        return "authentication failure"
+        return "authentication failure", "medium"
     if "no such file" in lowered:
-        return "missing file or path"
-    return None
+        return "missing file or path", "high"
+    return None, "low"

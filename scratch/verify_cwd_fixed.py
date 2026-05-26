@@ -49,6 +49,7 @@ def test_cwd_narrowness_fixed():
         project_root=root_sub,
         category="error",
         root_cause="missing .env",
+        root_cause_confidence=None,
         event_time=now,
         env={}
     )
@@ -76,6 +77,7 @@ def test_cwd_narrowness_fixed():
         project_root=root_base,
         category="success",
         root_cause=None,
+        root_cause_confidence=None,
         event_time=success_time,
         env={}
     )

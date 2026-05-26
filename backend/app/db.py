@@ -96,6 +96,10 @@ class Store:
                 self.conn.execute("ALTER TABLE events ADD COLUMN project_root TEXT")
             except sqlite3.OperationalError:
                 pass # Already exists
+            try:
+                self.conn.execute("ALTER TABLE events ADD COLUMN root_cause_confidence TEXT")
+            except sqlite3.OperationalError:
+                pass # Already exists
 
             self.conn.executescript(
                 """
@@ -171,6 +175,7 @@ class Store:
         project_root: str,
         category: str,
         root_cause: str | None,
+        root_cause_confidence: str | None,
         event_time: datetime,
         env: dict[str, str] | None,
     ) -> tuple[int, int]:
@@ -193,9 +198,10 @@ class Store:
                     project_root,
                     category,
                     root_cause,
+                    root_cause_confidence,
                     captured_at,
                     env_json
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     session_id,
@@ -207,6 +213,7 @@ class Store:
                     project_root,
                     category,
                     root_cause,
+                    root_cause_confidence,
                     to_iso(event_time),
                     json.dumps(env or {}),
                 ),
@@ -274,6 +281,38 @@ class Store:
 
     def get_event(self, event_id: int) -> sqlite3.Row | None:
         with self.lock:
+            return self.conn.execute("SELECT * FROM events WHERE id = ?", (event_id,)).fetchone()
+
+    def update_event_correction(
+        self,
+        event_id: int,
+        category: str | None = None,
+        root_cause: str | None = None,
+    ) -> sqlite3.Row | None:
+        with self.lock:
+            event = self.conn.execute("SELECT * FROM events WHERE id = ?", (event_id,)).fetchone()
+            if event is None:
+                return None
+
+            updates: list[str] = []
+            params: list[str | int] = []
+            if category is not None:
+                updates.append("category = ?")
+                params.append(category)
+            if root_cause is not None:
+                updates.append("root_cause = ?")
+
+                params.append(root_cause)
+
+            if not updates:
+                return event
+
+            params.append(event_id)
+            self.conn.execute(
+                f"UPDATE events SET {', '.join(updates)} WHERE id = ?",
+                params,
+            )
+            self.conn.commit()
             return self.conn.execute("SELECT * FROM events WHERE id = ?", (event_id,)).fetchone()
 
     def search_events_like(self, query: str, limit: int) -> list[sqlite3.Row]:

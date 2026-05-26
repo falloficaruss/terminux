@@ -97,6 +97,19 @@ class HealthResponse(BaseModel):
     version: str
 
 
+class CorrectionRequest(BaseModel):
+    category: str | None = Field(default=None, min_length=1)
+    root_cause: str | None = None
+
+
+class CorrectionResponse(BaseModel):
+    event_id: int
+    session_id: int
+    category: str
+    root_cause: str | None
+    message: str
+
+
 class ValidationScenarioResult(BaseModel):
     scenario: str
     passed: bool

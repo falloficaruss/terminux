@@ -149,33 +149,42 @@ class TestClassifyEventEdgeCases:
 # ---------------------------------------------------------------------------
 class TestLikelyRootCause:
     @pytest.mark.parametrize(
-        "output, expected",
+        "output, expected_cause, expected_confidence",
         [
-            ("Error: address already in use", "port conflict"),
-            ("port is already allocated", "port conflict"),
-            ("Permission denied", "permission issue"),
-            ("connection refused", "service unavailable"),
-            ("ModuleNotFoundError: No module named 'foo'", "missing dependency"),
-            ("module not found: bar", "missing dependency"),
-            ("401 Authentication required", "authentication failure"),
-            ("HTTP 401 Unauthorized", "authentication failure"),
-            ("cp: no such file or directory: /x", "missing file or path"),
+            ("Error: address already in use", "port conflict", "high"),
+            ("port is already allocated", "port conflict", "high"),
+            ("Permission denied", "permission issue", "high"),
+            ("connection refused", "service unavailable", "high"),
+            ("ModuleNotFoundError: No module named 'foo'", "missing dependency", "high"),
+            ("module not found: bar", "missing dependency", "high"),
+            ("401 Authentication required", "authentication failure", "medium"),
+            ("HTTP 401 Unauthorized", "authentication failure", "medium"),
+            ("cp: no such file or directory: /x", "missing file or path", "high"),
         ],
     )
-    def test_known_causes(self, output: str, expected: str) -> None:
-        assert likely_root_cause(output) == expected
+    def test_known_causes(self, output: str, expected_cause: str, expected_confidence: str) -> None:
+        cause, confidence = likely_root_cause(output)
+        assert cause == expected_cause
+        assert confidence == expected_confidence
 
     def test_none_for_unknown_output(self) -> None:
-        assert likely_root_cause("Everything looks fine") is None
+        cause, confidence = likely_root_cause("Everything looks fine")
+        assert cause is None
+        assert confidence == "low"
 
     def test_case_insensitive(self) -> None:
-        assert likely_root_cause("ADDRESS ALREADY IN USE") == "port conflict"
-        assert likely_root_cause("PERMISSION DENIED") == "permission issue"
+        cause1, conf1 = likely_root_cause("ADDRESS ALREADY IN USE")
+        assert cause1 == "port conflict"
+        assert conf1 == "high"
+        cause2, conf2 = likely_root_cause("PERMISSION DENIED")
+        assert cause2 == "permission issue"
+        assert conf2 == "high"
 
     def test_priority_order(self) -> None:
         """When output contains multiple signals, the first match wins."""
         combined = "address already in use and permission denied"
-        assert likely_root_cause(combined) == "port conflict"
+        cause, _ = likely_root_cause(combined)
+        assert cause == "port conflict"
 
 
 # ---------------------------------------------------------------------------

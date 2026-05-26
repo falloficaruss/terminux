@@ -28,8 +28,10 @@ def test_cwd_narrowness():
         exit_code=1,
         duration_ms=100,
         cwd=cwd_sub,
+        project_root=cwd_sub,
         category="error",
         root_cause="missing .env",
+        root_cause_confidence=None,
         event_time=now,
         env={}
     )

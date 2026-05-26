@@ -72,6 +72,18 @@ class VectorStore:
         except Exception as exc:  # pragma: no cover
             logger.warning("Vector upsert failed; continuing without vector index: %s", exc)
 
+    def set_payload_fields(self, event_id: int, fields: dict[str, Any]) -> None:
+        if not self._enabled or not self._client:
+            return
+        try:
+            self._client.set_payload(
+                collection_name=self._cfg.qdrant_collection,
+                payload=fields,
+                points=[int(event_id)],
+            )
+        except Exception as exc:  # pragma: no cover
+            logger.warning("Qdrant set_payload failed: %s", exc)
+
     def search(self, query: str, limit: int, query_filter: Any = None) -> list[VectorHit]:
         if not self._enabled or not self._client:
             return []

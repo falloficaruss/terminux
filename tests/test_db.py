@@ -32,6 +32,7 @@ def _add(
     project_root: str = "/home/user/project",
     category: str = "general",
     root_cause: str | None = None,
+    root_cause_confidence: str | None = None,
     event_time: datetime | None = None,
     env: dict[str, str] | None = None,
 ) -> tuple[int, int]:
@@ -45,6 +46,7 @@ def _add(
         project_root=project_root,
         category=category,
         root_cause=root_cause,
+        root_cause_confidence=root_cause_confidence,
         event_time=event_time or _ts(),
         env=env,
     )
@@ -375,3 +377,37 @@ class TestWeeklyStats:
         assert stats["total_events"] == 0
         assert stats["total_failures"] == 0
         assert stats["failure_rate"] == 0.0
+
+
+# ---------------------------------------------------------------------------
+# Correction
+# ---------------------------------------------------------------------------
+class TestEventCorrection:
+    def test_correct_category(self, store: Store) -> None:
+        eid, _ = _add(store, command="echo hi", category="general", event_time=_ts(0))
+        updated = store.update_event_correction(eid, category="python-dev")
+        assert updated is not None
+        assert updated["category"] == "python-dev"
+        assert updated["command"] == "echo hi"  # unchanged
+
+    def test_correct_root_cause(self, store: Store) -> None:
+        eid, _ = _add(store, command="build", root_cause="port conflict", event_time=_ts(0))
+        updated = store.update_event_correction(eid, root_cause="permission issue")
+        assert updated is not None
+        assert updated["root_cause"] == "permission issue"
+
+    def test_correct_both(self, store: Store) -> None:
+        eid, _ = _add(store, command="build", category="container", root_cause="port conflict", event_time=_ts(0))
+        updated = store.update_event_correction(eid, category="deployment", root_cause="auth failure")
+        assert updated["category"] == "deployment"
+        assert updated["root_cause"] == "auth failure"
+
+    def test_correct_none_returns_unchanged(self, store: Store) -> None:
+        eid, _ = _add(store, command="echo hi", category="general", event_time=_ts(0))
+        updated = store.update_event_correction(eid)
+        assert updated is not None
+        assert updated["category"] == "general"
+
+    def test_correct_nonexistent_event(self, store: Store) -> None:
+        updated = store.update_event_correction(9999, category="general")
+        assert updated is None

@@ -274,6 +274,39 @@ def cmd_ingest(args: argparse.Namespace) -> int:
     return 0
 
 
+# ── correct ───────────────────────────────────────────────────────
+def cmd_correct(args: argparse.Namespace) -> int:
+    if args.category is None and args.root_cause is None:
+        err_console.print("[bold red]error:[/bold red] Provide at least one of --category or --root-cause")
+        return 1
+
+    payload: dict[str, str] = {}
+    if args.category is not None:
+        payload["category"] = args.category
+    if args.root_cause is not None:
+        payload["root_cause"] = args.root_cause
+
+    data = _request("PATCH", f"/v1/events/{args.event_id}", json=payload)
+
+    if args.json:
+        print(json.dumps(data, indent=2))
+        return 0
+
+    changed = []
+    if args.category is not None:
+        changed.append(f"[bold]Category:[/bold]  [yellow]{data.get('category')}[/yellow]")
+    if args.root_cause is not None:
+        changed.append(f"[bold]Root Cause:[/bold]  [yellow]{data.get('root_cause')}[/yellow]")
+
+    console.print(Panel(
+        f"[bold]Event ID:[/bold]   {data.get('event_id')}\n"
+        f"{chr(10).join(changed)}",
+        title="[bold green]✓ Corrected[/bold green]",
+        border_style="green",
+    ))
+    return 0
+
+
 # ── status ────────────────────────────────────────────────────────
 def cmd_status(args: argparse.Namespace) -> int:
     try:
@@ -336,6 +369,13 @@ def build_parser() -> argparse.ArgumentParser:
     ingest.add_argument("--duration-ms", type=int)
     ingest.add_argument("--json", action="store_true", help="Output raw JSON")
     ingest.set_defaults(func=cmd_ingest)
+
+    correct = subparsers.add_parser("correct", help="Correct a misclassified event's category or root cause")
+    correct.add_argument("event_id", type=int, help="Event ID to correct")
+    correct.add_argument("--category", help="New category label")
+    correct.add_argument("--root-cause", dest="root_cause", help="New root cause label")
+    correct.add_argument("--json", action="store_true", help="Output raw JSON")
+    correct.set_defaults(func=cmd_correct)
 
     status = subparsers.add_parser("status", help="Check backend service health and active model configurations")
     status.add_argument("--json", action="store_true", help="Output raw JSON")
