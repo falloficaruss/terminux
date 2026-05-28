@@ -1,13 +1,12 @@
 """Tests for backend/app/vector_store.py.
 
-VectorStore depends on Qdrant + an embedding backend, both of which are
-external services.  These tests cover the guard-clause / disabled-path logic
-that can be exercised without standing up infrastructure.
+VectorStore uses SQLite as a local vector database, which operates out-of-the-box
+without any external services.
 """
 from __future__ import annotations
 
 from dataclasses import dataclass
-from unittest.mock import MagicMock, patch
+from typing import Any
 
 import pytest
 
@@ -15,15 +14,32 @@ from app.vector_store import VectorHit, VectorStore
 
 
 # ---------------------------------------------------------------------------
-# Helpers: a Settings stub that keeps Qdrant disabled
+# Settings Stubs for Testing
 # ---------------------------------------------------------------------------
 @dataclass
 class _DisabledSettings:
-    """Minimal Settings lookalike with Qdrant turned off."""
+    """Minimal Settings lookalike with vector store turned off."""
     sqlite_path: str = ":memory:"
-    qdrant_url: str = "http://localhost:6333"
-    qdrant_collection: str = "test_collection"
-    qdrant_enabled: bool = False
+    vector_store_enabled: bool = False
+    session_gap_seconds: int = 1200
+    recall_default_limit: int = 5
+    embedding_backend: str = "hash"
+    embedding_dim: int = 64
+    embedding_timeout_seconds: float = 2.0
+    synthesis_timeout_seconds: float = 2.0
+    gemini_api_key: str = ""
+    gemini_api_base: str = ""
+    gemini_embedding_model: str = "models/text-embedding-004"
+    gemini_generative_model: str = "gemini-2.5-flash"
+    ollama_api_base: str = "http://localhost:11434"
+    ollama_embedding_model: str = "nomic-embed-text"
+
+
+@dataclass
+class _EnabledSettings:
+    """Minimal Settings lookalike with vector store turned on."""
+    sqlite_path: str = ":memory:"
+    vector_store_enabled: bool = True
     session_gap_seconds: int = 1200
     recall_default_limit: int = 5
     embedding_backend: str = "hash"
@@ -42,11 +58,11 @@ class _DisabledSettings:
 # VectorStore  –  disabled / guard-clause paths
 # ---------------------------------------------------------------------------
 class TestVectorStoreDisabled:
-    """When qdrant_enabled=False every public method should be a safe no-op."""
+    """When vector_store_enabled=False every public method should be a safe no-op."""
 
     @pytest.fixture()
     def vs(self) -> VectorStore:
-        cfg = _DisabledSettings(qdrant_enabled=False)
+        cfg = _DisabledSettings()
         return VectorStore(cfg)
 
     def test_enabled_property(self, vs: VectorStore) -> None:
@@ -76,6 +92,92 @@ class TestVectorStoreDisabled:
 
 
 # ---------------------------------------------------------------------------
+# VectorStore  –  enabled / SQLite functionality tests
+# ---------------------------------------------------------------------------
+class TestVectorStoreEnabled:
+    """Verify that the SQLite vector store works perfectly when enabled."""
+
+    @pytest.fixture()
+    def vs(self) -> VectorStore:
+        cfg = _EnabledSettings()
+        return VectorStore(cfg)
+
+    def test_enabled_and_ready(self, vs: VectorStore) -> None:
+        assert vs.enabled is True
+        assert vs.ready is True
+
+    def test_upsert_and_search(self, vs: VectorStore) -> None:
+        vs.upsert_event_memory(
+            event_id=1,
+            text="docker command failed",
+            payload={"event_id": 1, "exit_code": 1, "project_root": "/app"},
+        )
+        vs.upsert_event_memory(
+            event_id=2,
+            text="git push successful",
+            payload={"event_id": 2, "exit_code": 0, "project_root": "/app"},
+        )
+
+        # Normal search should find matches
+        results = vs.search(query="docker", limit=5)
+        assert len(results) == 2
+        # Verify that score is computed and correct event ID is returned
+        assert results[0].point_id == "1"
+        assert results[0].score > 0.0
+
+    def test_search_failures(self, vs: VectorStore) -> None:
+        vs.upsert_event_memory(
+            event_id=1,
+            text="docker command failed",
+            payload={"event_id": 1, "exit_code": 1, "project_root": "/app"},
+        )
+        vs.upsert_event_memory(
+            event_id=2,
+            text="git push successful",
+            payload={"event_id": 2, "exit_code": 0, "project_root": "/app"},
+        )
+
+        # search_failures should only return event 1 (since event 2 exit_code = 0)
+        results = vs.search_failures(query="command", limit=5)
+        assert len(results) == 1
+        assert results[0].point_id == "1"
+
+    def test_find_similar_failure(self, vs: VectorStore) -> None:
+        vs.upsert_event_memory(
+            event_id=10,
+            text="make build failed error 127",
+            payload={"event_id": 10, "exit_code": 127, "project_root": "/proj1"},
+        )
+        vs.upsert_event_memory(
+            event_id=11,
+            text="make build failed error 127",
+            payload={"event_id": 11, "exit_code": 127, "project_root": "/proj2"},
+        )
+
+        # Similar failure in /proj1 should find event 10
+        hit = vs.find_similar_failure(command="make", project_root="/proj1", threshold=0.3)
+        assert hit is not None
+        assert hit.point_id == "10"
+
+        # In a different project, it should not match event 10
+        hit_other = vs.find_similar_failure(command="make", project_root="/proj3")
+        assert hit_other is None
+
+    def test_set_payload_fields(self, vs: VectorStore) -> None:
+        vs.upsert_event_memory(
+            event_id=5,
+            text="npm install error",
+            payload={"event_id": 5, "category": "npm", "exit_code": 1},
+        )
+        vs.set_payload_fields(event_id=5, fields={"category": "yarn", "updated": True})
+
+        results = vs.search(query="npm", limit=1)
+        assert len(results) == 1
+        assert results[0].payload["category"] == "yarn"
+        assert results[0].payload["updated"] is True
+
+
+# ---------------------------------------------------------------------------
 # VectorHit dataclass
 # ---------------------------------------------------------------------------
 class TestVectorHit:
@@ -89,55 +191,3 @@ class TestVectorHit:
         a = VectorHit(point_id="1", score=0.9, payload={})
         b = VectorHit(point_id="1", score=0.9, payload={})
         assert a == b
-
-
-# ---------------------------------------------------------------------------
-# VectorStore  –  connection failure graceful degradation
-# ---------------------------------------------------------------------------
-class TestVectorStoreConnectionFailure:
-    """If Qdrant is enabled but unreachable, the store should degrade
-    gracefully to disabled state rather than crashing."""
-
-    def test_unreachable_qdrant_disables_store(self) -> None:
-        cfg = _DisabledSettings(qdrant_enabled=True, qdrant_url="http://localhost:1")
-        vs = VectorStore(cfg)
-        # Should have fallen back to disabled
-        assert vs.enabled is False
-        assert vs.ready is False
-        # All operations should be safe no-ops
-        assert vs.search("test", limit=5) == []
-        assert vs.find_similar_failure("cmd", "/root") is None
-
-
-# ---------------------------------------------------------------------------
-# find_similar_failure  –  threshold logic (mocked)
-# ---------------------------------------------------------------------------
-class TestFindSimilarFailureThreshold:
-    """Test threshold filtering without a real Qdrant instance."""
-
-    def _make_vs_with_mock_search(self, hits: list[VectorHit]) -> VectorStore:
-        cfg = _DisabledSettings(qdrant_enabled=False)
-        vs = VectorStore(cfg)
-        # Force enabled so the method body runs
-        vs._enabled = True
-        vs._client = MagicMock()
-        vs.search = MagicMock(return_value=hits)  # type: ignore[assignment]
-        return vs
-
-    def test_above_threshold_returns_hit(self) -> None:
-        hit = VectorHit(point_id="10", score=0.92, payload={"cmd": "build"})
-        vs = self._make_vs_with_mock_search([hit])
-        result = vs.find_similar_failure("build", "/proj", threshold=0.8)
-        assert result is not None
-        assert result.score == 0.92
-
-    def test_below_threshold_returns_none(self) -> None:
-        hit = VectorHit(point_id="10", score=0.5, payload={"cmd": "build"})
-        vs = self._make_vs_with_mock_search([hit])
-        result = vs.find_similar_failure("build", "/proj", threshold=0.8)
-        assert result is None
-
-    def test_empty_results_returns_none(self) -> None:
-        vs = self._make_vs_with_mock_search([])
-        result = vs.find_similar_failure("build", "/proj", threshold=0.8)
-        assert result is None

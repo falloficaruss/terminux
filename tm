@@ -323,7 +323,7 @@ def cmd_status(args: argparse.Namespace) -> int:
     console.print(Panel(
         f"[bold]API Status:[/bold]            [green]✓ {data.get('status', 'ok')}[/green]\n"
         f"[bold]SQLite DB Status:[/bold]      [green]✓ Ready[/green] ({'Connected' if data.get('db_ready') else 'Error'})\n"
-        f"[bold]Qdrant Vector DB:[/bold]      {'[green]✓ Connected[/green]' if data.get('qdrant_ready') else '[yellow]⚠ Disabled/Disconnected[/yellow]'}\n"
+        f"[bold]Vector Store Status:[/bold]  {'[green]✓ Ready (SQLite)[/green]' if data.get('vector_store_ready') else '[yellow]⚠ Disabled[/yellow]'}\n"
         f"[bold]Active Embeddings:[/bold]     [cyan]{data.get('embedding_backend')}[/cyan] (dim={data.get('embedding_dim')})\n"
         f"[bold]Terminux Version:[/bold]      {data.get('version', '0.1.0')}",
         title="[bold cyan]Terminux System Status[/bold cyan]",

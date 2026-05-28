@@ -25,9 +25,7 @@ def _as_bool(value: str, default: bool) -> bool:
 @dataclass(frozen=True)
 class Settings:
     sqlite_path: str = os.getenv("TERMINUX_SQLITE_PATH", "./data/terminux.db")
-    qdrant_url: str = os.getenv("TERMINUX_QDRANT_URL", "http://127.0.0.1:6333")
-    qdrant_collection: str = os.getenv("TERMINUX_QDRANT_COLLECTION", "terminux_memory")
-    qdrant_enabled: bool = _as_bool(os.getenv("TERMINUX_QDRANT_ENABLED", "true"), True)
+    vector_store_enabled: bool = _as_bool(os.getenv("TERMINUX_VECTOR_STORE_ENABLED", "true"), True)
 
     session_gap_seconds: int = int(os.getenv("TERMINUX_SESSION_GAP_SECONDS", "1200"))
     recall_default_limit: int = int(os.getenv("TERMINUX_RECALL_DEFAULT_LIMIT", "5"))

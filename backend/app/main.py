@@ -77,8 +77,8 @@ def health() -> HealthResponse:
     return HealthResponse(
         ok=True,
         db_ready=store.is_ready(),
-        qdrant_enabled=vector_store.enabled,
-        qdrant_ready=vector_store.ready,
+        vector_store_enabled=vector_store.enabled,
+        vector_store_ready=vector_store.ready,
         embedding_backend=vector_store.embedding_backend,
         embedding_dim=vector_store.embedding_dim,
         version=app.version,

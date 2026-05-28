@@ -90,8 +90,8 @@ class WeeklyReportResponse(BaseModel):
 class HealthResponse(BaseModel):
     ok: bool
     db_ready: bool
-    qdrant_enabled: bool
-    qdrant_ready: bool
+    vector_store_enabled: bool
+    vector_store_ready: bool
     embedding_backend: str
     embedding_dim: int
     version: str
