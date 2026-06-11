@@ -143,6 +143,19 @@ class TestClassifyEventEdgeCases:
         Documents this gotcha."""
         assert classify_event("cat reqs.txt |pip install -r -", "") == "package-management"
 
+    def test_priority_ordering(self) -> None:
+        """When a command matches multiple categories, the first-declared wins.
+
+        git-workflow is declared before package-management, so 'gh' must
+        return git-workflow even if the command also contains 'install'.
+        """
+        assert classify_event("gh repo clone user/repo", "") == "git-workflow"
+        assert classify_event("gh pr create", "") == "git-workflow"
+        # 'gh' matches git-workflow even in an install context
+        assert classify_event("pip install gh", "") == "git-workflow"
+        # 'npm' matches package-management when no earlier category matches
+        assert classify_event("npm init", "") == "package-management"
+
 
 # ---------------------------------------------------------------------------
 # likely_root_cause

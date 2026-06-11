@@ -4,6 +4,7 @@ import hashlib
 import logging
 import math
 import re
+import time
 from typing import Any
 
 import httpx
@@ -13,6 +14,7 @@ from .config import Settings
 logger = logging.getLogger(__name__)
 TOKEN_PATTERN = re.compile(r"[a-z0-9_./-]+")
 SUPPORTED_BACKENDS = {"hash", "gemini"}
+_RETRY_INTERVAL: float = 300.0
 
 
 def _tokenize(text: str) -> list[str]:
@@ -43,24 +45,45 @@ class EmbeddingEngine:
         requested = cfg.embedding_backend.strip().lower()
         self._requested_backend = requested if requested in SUPPORTED_BACKENDS else "gemini"
         self._runtime_backend = self._requested_backend
-        self._client = httpx.Client(timeout=cfg.embedding_timeout_seconds)
+        self._degraded_at: float | None = None
+        self._client = httpx.AsyncClient(timeout=cfg.embedding_timeout_seconds)
 
-        self._initialize_backend()
-
-    def _initialize_backend(self) -> None:
+    async def initialize(self) -> None:
         if self._runtime_backend == "gemini" and not self._cfg.gemini_api_key:
             logger.warning("TERMINUX_GEMINI_API_KEY missing. Attempting fallback to ollama.")
             self._runtime_backend = "ollama"
 
         if self._runtime_backend == "ollama":
             try:
-                # Quick health check for Ollama
                 url = f"{self._cfg.ollama_api_base.rstrip('/')}/api/tags"
-                resp = self._client.get(url)
+                resp = await self._client.get(url)
                 resp.raise_for_status()
             except Exception as exc:
                 logger.warning("Ollama backend unavailable (%s). Falling back to hash.", exc)
                 self._runtime_backend = "hash"
+
+    async def _maybe_restore_backend(self) -> None:
+        if self._runtime_backend == self._requested_backend:
+            return
+        if self._degraded_at is None:
+            return
+        if time.monotonic() - self._degraded_at < _RETRY_INTERVAL:
+            return
+
+        candidate = self._requested_backend
+        try:
+            if candidate == "gemini" and not self._cfg.gemini_api_key:
+                candidate = "ollama"
+            if candidate == "ollama":
+                url = f"{self._cfg.ollama_api_base.rstrip('/')}/api/tags"
+                resp = await self._client.get(url)
+                resp.raise_for_status()
+            self._runtime_backend = candidate
+            self._degraded_at = None
+            logger.info("Restored embedding backend to '%s'.", candidate)
+        except Exception as exc:
+            logger.debug("Backend restore attempt for '%s' failed: %s", candidate, exc)
+            self._degraded_at = time.monotonic()
 
     @property
     def backend(self) -> str:
@@ -70,31 +93,34 @@ class EmbeddingEngine:
     def dim(self) -> int:
         return self._cfg.embedding_dim
 
-    def embed_text(self, text: str) -> list[float]:
+    async def embed_text(self, text: str) -> list[float]:
+        await self._maybe_restore_backend()
+
         if self._runtime_backend == "gemini":
             try:
-                return self._embed_with_gemini(text)
-            except Exception as exc:  # pragma: no cover
+                return await self._embed_with_gemini(text)
+            except Exception as exc:
                 logger.warning("Gemini embeddings failed (%s). Falling back to ollama.", exc)
                 self._runtime_backend = "ollama"
-                # Fall through to ollama check
+                self._degraded_at = time.monotonic()
 
         if self._runtime_backend == "ollama":
             try:
-                return self._embed_with_ollama(text)
-            except Exception as exc:  # pragma: no cover
+                return await self._embed_with_ollama(text)
+            except Exception as exc:
                 logger.warning("Ollama embeddings failed (%s). Falling back to hash backend.", exc)
                 self._runtime_backend = "hash"
+                self._degraded_at = time.monotonic()
 
         return _hash_embed(text, dim=self._cfg.embedding_dim)
 
-    def _embed_with_ollama(self, text: str) -> list[float]:
+    async def _embed_with_ollama(self, text: str) -> list[float]:
         url = f"{self._cfg.ollama_api_base.rstrip('/')}/api/embeddings"
         payload = {
             "model": self._cfg.ollama_embedding_model,
             "prompt": text,
         }
-        response = self._client.post(url, json=payload)
+        response = await self._client.post(url, json=payload)
         response.raise_for_status()
         data = response.json()
         values = data.get("embedding")
@@ -102,7 +128,7 @@ class EmbeddingEngine:
             raise ValueError("Ollama response missing embedding values")
         return self._normalize_dim([float(v) for v in values])
 
-    def _embed_with_gemini(self, text: str) -> list[float]:
+    async def _embed_with_gemini(self, text: str) -> list[float]:
         model = self._cfg.gemini_embedding_model
         if not model.startswith("models/"):
             model = f"models/{model}"
@@ -126,7 +152,7 @@ class EmbeddingEngine:
         last_error: Exception | None = None
         for payload in payloads:
             try:
-                response = self._client.post(url, headers=headers, json=payload)
+                response = await self._client.post(url, headers=headers, json=payload)
                 response.raise_for_status()
                 values = self._extract_values(response.json())
                 return self._normalize_dim(values)

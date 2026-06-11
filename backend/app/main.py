@@ -1,3 +1,4 @@
+import asyncio
 import logging
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone
@@ -34,7 +35,8 @@ logger = logging.getLogger(__name__)
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    # Startup: Check embedding backend
+    # Startup: Initialize async resources
+    await vector_store.initialize()
     backend = vector_store.embedding_backend
     if backend == "hash":
         logger.warning(
@@ -45,6 +47,9 @@ async def lifespan(app: FastAPI):
     else:
         logger.info("Terminux starting with '%s' embedding backend.", backend)
     yield
+    # Shutdown: Close async HTTP clients
+    await vector_store._embedder._client.aclose()
+    await synthesis_engine._client.aclose()
 
 
 app = FastAPI(title="Terminux Memory API", version="0.1.0", lifespan=lifespan)
@@ -86,7 +91,7 @@ def health() -> HealthResponse:
 
 
 @app.post("/v1/events", response_model=EventOut)
-def ingest_event(payload: EventIn) -> EventOut:
+async def ingest_event(payload: EventIn) -> EventOut:
     event_time = _to_utc(payload.timestamp)
     redacted_command = redact_sensitive_text(payload.command or "")
     redacted_output = redact_sensitive_text(payload.output or "")
@@ -95,7 +100,8 @@ def ingest_event(payload: EventIn) -> EventOut:
     root_cause, root_cause_confidence = likely_root_cause(redacted_output) if payload.exit_code != 0 else (None, None)
 
     project_root = find_project_root(payload.cwd)
-    event_id, session_id = store.add_event(
+    event_id, session_id = await asyncio.to_thread(
+        store.add_event,
         command=redacted_command,
         output=redacted_output,
         exit_code=payload.exit_code,
@@ -109,7 +115,7 @@ def ingest_event(payload: EventIn) -> EventOut:
         env=redacted_env,
     )
 
-    vector_store.upsert_event_memory(
+    await vector_store.upsert_event_memory(
         event_id=event_id,
         text=f"{redacted_command}\n{redacted_output}\n{category}\n{root_cause or ''}",
         payload={
@@ -132,7 +138,7 @@ def ingest_event(payload: EventIn) -> EventOut:
         
         # 1. Try semantic match across sessions (if enabled)
         if vector_store.enabled:
-            similar = vector_store.find_similar_failure(command=payload.command, project_root=project_root)
+            similar = await vector_store.find_similar_failure(command=payload.command, project_root=project_root)
             if similar:
                 failure = store.get_event(int(similar.payload["event_id"]))
         
@@ -189,14 +195,14 @@ def correct_event(event_id: int, correction: CorrectionRequest) -> CorrectionRes
 
 
 @app.get("/v1/recall", response_model=RecallResponse)
-def recall(
+async def recall(
     query: str = Query(min_length=2),
     limit: int = Query(default=settings.recall_default_limit, ge=1, le=20),
 ) -> RecallResponse:
     results: list[RecallItem] = []
     seen: set[int] = set()
 
-    vector_hits = vector_store.search(query, limit=limit)
+    vector_hits = await vector_store.search(query, limit=limit)
     for hit in vector_hits:
         event_id = int(hit.payload.get("event_id") or hit.point_id)
         if event_id in seen:
@@ -240,7 +246,7 @@ def recall(
 
     answer = None
     if results:
-        answer = synthesis_engine.synthesize_answer(query=query, items=results)
+        answer = await synthesis_engine.synthesize_answer(query=query, items=results)
 
     return RecallResponse(query=query, results=results, answer=answer)
 
@@ -292,7 +298,7 @@ def replay_session(
 
 
 @app.post("/v1/preflight", response_model=PreflightResponse)
-def preflight(payload: PreflightRequest) -> PreflightResponse:
+async def preflight(payload: PreflightRequest) -> PreflightResponse:
     terms = [payload.task, *payload.commands]
     warnings: list[dict[str, Any]] = []
     seen_event_ids: set[int] = set()
@@ -300,7 +306,7 @@ def preflight(payload: PreflightRequest) -> PreflightResponse:
 
     # 1. Semantic search for each term (failures only)
     for term in terms:
-        hits = vector_store.search_failures(query=term, limit=3)
+        hits = await vector_store.search_failures(query=term, limit=3)
         relevant = [h for h in hits if h.score >= 0.45]
         if not relevant:
             continue
@@ -349,7 +355,7 @@ def preflight(payload: PreflightRequest) -> PreflightResponse:
 
 
 @app.get("/v1/weekly-report", response_model=WeeklyReportResponse)
-def weekly_report(days: int = Query(default=7, ge=1, le=90)) -> WeeklyReportResponse:
+async def weekly_report(days: int = Query(default=7, ge=1, le=90)) -> WeeklyReportResponse:
     stats = store.weekly_stats(days=days)
     return WeeklyReportResponse(
         period_days=stats["period_days"],
@@ -362,9 +368,9 @@ def weekly_report(days: int = Query(default=7, ge=1, le=90)) -> WeeklyReportResp
 
 
 @app.get("/v1/validation", response_model=ValidationReport)
-def validation_report() -> ValidationReport:
-    sample_recall = recall(query="docker", limit=1)
-    sample_weekly = weekly_report(days=7)
+async def validation_report() -> ValidationReport:
+    sample_recall = await recall(query="docker", limit=1)
+    sample_weekly = await weekly_report(days=7)
 
     scenarios = [
         ValidationScenarioResult(

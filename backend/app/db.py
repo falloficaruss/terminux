@@ -48,6 +48,7 @@ class Store:
             Path(sqlite_path).parent.mkdir(parents=True, exist_ok=True)
             self.conn = sqlite3.connect(sqlite_path, check_same_thread=False)
             self.conn.row_factory = sqlite3.Row
+            self.conn.execute("PRAGMA journal_mode=wal")
             self._init_schema()
 
     def is_ready(self) -> bool:
@@ -121,7 +122,6 @@ class Store:
                 CREATE INDEX IF NOT EXISTS idx_failure_fixes_session_id ON failure_fixes(session_id);
                 """
             )
-            self.conn.commit()
             self.conn.commit()
 
     def _find_open_session(self, project_root: str, event_time: datetime) -> int | None:

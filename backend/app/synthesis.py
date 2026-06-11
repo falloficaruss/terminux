@@ -15,9 +15,9 @@ logger = logging.getLogger(__name__)
 class SynthesisEngine:
     def __init__(self, cfg: Settings) -> None:
         self._cfg = cfg
-        self._client = httpx.Client(timeout=cfg.synthesis_timeout_seconds)
+        self._client = httpx.AsyncClient(timeout=cfg.synthesis_timeout_seconds)
 
-    def synthesize_answer(self, query: str, items: list[RecallItem]) -> str | None:
+    async def synthesize_answer(self, query: str, items: list[RecallItem]) -> str | None:
         if not self._cfg.gemini_api_key:
             logger.warning("Synthesis disabled: TERMINUX_GEMINI_API_KEY missing.")
             return None
@@ -27,7 +27,7 @@ class SynthesisEngine:
 
         prompt = self._build_prompt(query, items)
         try:
-            return self._call_gemini(prompt)
+            return await self._call_gemini(prompt)
         except Exception as exc:
             logger.error("Synthesis failed: %s", exc)
             return None
@@ -49,7 +49,7 @@ class SynthesisEngine:
             f"Answer:"
         )
 
-    def _call_gemini(self, prompt: str) -> str | None:
+    async def _call_gemini(self, prompt: str) -> str | None:
         model = self._cfg.gemini_generative_model
         if not model.startswith("models/"):
             model = f"models/{model}"
@@ -67,7 +67,7 @@ class SynthesisEngine:
             },
         }
 
-        response = self._client.post(url, headers=headers, json=payload)
+        response = await self._client.post(url, headers=headers, json=payload)
         response.raise_for_status()
         data = response.json()
 

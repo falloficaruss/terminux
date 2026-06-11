@@ -71,18 +71,18 @@ class TestVectorStoreDisabled:
     def test_ready_property(self, vs: VectorStore) -> None:
         assert vs.ready is False
 
-    def test_upsert_is_noop(self, vs: VectorStore) -> None:
+    async def test_upsert_is_noop(self, vs: VectorStore) -> None:
         # Should not raise
-        vs.upsert_event_memory(event_id=1, text="hello", payload={"a": 1})
+        await vs.upsert_event_memory(event_id=1, text="hello", payload={"a": 1})
 
-    def test_search_returns_empty(self, vs: VectorStore) -> None:
-        assert vs.search(query="anything", limit=5) == []
+    async def test_search_returns_empty(self, vs: VectorStore) -> None:
+        assert await vs.search(query="anything", limit=5) == []
 
-    def test_search_failures_returns_empty(self, vs: VectorStore) -> None:
-        assert vs.search_failures(query="crash") == []
+    async def test_search_failures_returns_empty(self, vs: VectorStore) -> None:
+        assert await vs.search_failures(query="crash") == []
 
-    def test_find_similar_failure_returns_none(self, vs: VectorStore) -> None:
-        assert vs.find_similar_failure(command="build", project_root="/x") is None
+    async def test_find_similar_failure_returns_none(self, vs: VectorStore) -> None:
+        assert await vs.find_similar_failure(command="build", project_root="/x") is None
 
     def test_embedding_backend_exposed(self, vs: VectorStore) -> None:
         assert vs.embedding_backend == "hash"
@@ -106,72 +106,72 @@ class TestVectorStoreEnabled:
         assert vs.enabled is True
         assert vs.ready is True
 
-    def test_upsert_and_search(self, vs: VectorStore) -> None:
-        vs.upsert_event_memory(
+    async def test_upsert_and_search(self, vs: VectorStore) -> None:
+        await vs.upsert_event_memory(
             event_id=1,
             text="docker command failed",
             payload={"event_id": 1, "exit_code": 1, "project_root": "/app"},
         )
-        vs.upsert_event_memory(
+        await vs.upsert_event_memory(
             event_id=2,
             text="git push successful",
             payload={"event_id": 2, "exit_code": 0, "project_root": "/app"},
         )
 
         # Normal search should find matches
-        results = vs.search(query="docker", limit=5)
+        results = await vs.search(query="docker", limit=5)
         assert len(results) == 2
         # Verify that score is computed and correct event ID is returned
         assert results[0].point_id == "1"
         assert results[0].score > 0.0
 
-    def test_search_failures(self, vs: VectorStore) -> None:
-        vs.upsert_event_memory(
+    async def test_search_failures(self, vs: VectorStore) -> None:
+        await vs.upsert_event_memory(
             event_id=1,
             text="docker command failed",
             payload={"event_id": 1, "exit_code": 1, "project_root": "/app"},
         )
-        vs.upsert_event_memory(
+        await vs.upsert_event_memory(
             event_id=2,
             text="git push successful",
             payload={"event_id": 2, "exit_code": 0, "project_root": "/app"},
         )
 
         # search_failures should only return event 1 (since event 2 exit_code = 0)
-        results = vs.search_failures(query="command", limit=5)
+        results = await vs.search_failures(query="command", limit=5)
         assert len(results) == 1
         assert results[0].point_id == "1"
 
-    def test_find_similar_failure(self, vs: VectorStore) -> None:
-        vs.upsert_event_memory(
+    async def test_find_similar_failure(self, vs: VectorStore) -> None:
+        await vs.upsert_event_memory(
             event_id=10,
             text="make build failed error 127",
             payload={"event_id": 10, "exit_code": 127, "project_root": "/proj1"},
         )
-        vs.upsert_event_memory(
+        await vs.upsert_event_memory(
             event_id=11,
             text="make build failed error 127",
             payload={"event_id": 11, "exit_code": 127, "project_root": "/proj2"},
         )
 
         # Similar failure in /proj1 should find event 10
-        hit = vs.find_similar_failure(command="make", project_root="/proj1", threshold=0.3)
+        hit = await vs.find_similar_failure(command="make", project_root="/proj1", threshold=0.3)
         assert hit is not None
         assert hit.point_id == "10"
 
         # In a different project, it should not match event 10
-        hit_other = vs.find_similar_failure(command="make", project_root="/proj3")
+        hit_other = await vs.find_similar_failure(command="make", project_root="/proj3")
         assert hit_other is None
 
-    def test_set_payload_fields(self, vs: VectorStore) -> None:
-        vs.upsert_event_memory(
+    async def test_set_payload_fields(self, vs: VectorStore) -> None:
+        await vs.upsert_event_memory(
             event_id=5,
             text="npm install error",
             payload={"event_id": 5, "category": "npm", "exit_code": 1},
         )
         vs.set_payload_fields(event_id=5, fields={"category": "yarn", "updated": True})
 
-        results = vs.search(query="npm", limit=1)
+        results = await vs.search(query="npm", limit=1)
         assert len(results) == 1
         assert results[0].payload["category"] == "yarn"
         assert results[0].payload["updated"] is True

@@ -83,6 +83,10 @@ class VectorStore:
             self._ready = False
             self._conn = None
 
+    async def initialize(self) -> None:
+        if self._embedder:
+            await self._embedder.initialize()
+
     @property
     def enabled(self) -> bool:
         return self._enabled
@@ -99,12 +103,12 @@ class VectorStore:
     def embedding_dim(self) -> int:
         return self._embedder.dim
 
-    def upsert_event_memory(self, event_id: int, text: str, payload: dict[str, Any]) -> None:
+    async def upsert_event_memory(self, event_id: int, text: str, payload: dict[str, Any]) -> None:
         if not self._enabled or not self._conn:
             return
 
         try:
-            vector = self._embedder.embed_text(text)
+            vector = await self._embedder.embed_text(text)
             with self._conn:
                 self._conn.execute(
                     """
@@ -162,12 +166,12 @@ class VectorStore:
 
         return True
 
-    def search(self, query: str, limit: int, query_filter: Any = None) -> list[VectorHit]:
+    async def search(self, query: str, limit: int, query_filter: Any = None) -> list[VectorHit]:
         if not self._enabled or not self._conn:
             return []
 
         try:
-            query_vector = self._embedder.embed_text(query)
+            query_vector = await self._embedder.embed_text(query)
 
             # Fetch all stored vectors
             rows = self._conn.execute("SELECT event_id, vector, payload FROM event_vectors").fetchall()
@@ -204,7 +208,7 @@ class VectorStore:
             logger.warning("Vector search failed; falling back: %s", exc)
             return []
 
-    def search_failures(self, query: str, limit: int = 5) -> list[VectorHit]:
+    async def search_failures(self, query: str, limit: int = 5) -> list[VectorHit]:
         """Semantic search scoped to failure events only (exit_code != 0)."""
         if not self._enabled or not self._conn:
             return []
@@ -214,9 +218,9 @@ class VectorStore:
                 models.FieldCondition(key="exit_code", match=models.MatchValue(value=0)),
             ]
         )
-        return self.search(query=query, limit=limit, query_filter=query_filter)
+        return await self.search(query=query, limit=limit, query_filter=query_filter)
 
-    def find_similar_failure(self, command: str, project_root: str, threshold: float = 0.8) -> VectorHit | None:
+    async def find_similar_failure(self, command: str, project_root: str, threshold: float = 0.8) -> VectorHit | None:
         if not self._enabled or not self._conn:
             return None
 
@@ -230,7 +234,7 @@ class VectorStore:
             ],
         )
 
-        hits = self.search(query=command, limit=1, query_filter=query_filter)
+        hits = await self.search(query=command, limit=1, query_filter=query_filter)
         if hits and hits[0].score >= threshold:
             return hits[0]
         return None

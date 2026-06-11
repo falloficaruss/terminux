@@ -2,6 +2,9 @@ from __future__ import annotations
 
 import re
 
+# WARNING: Order is load-bearing — categories are checked in definition order
+# and the first match wins. Higher-specificity categories (e.g. git-workflow)
+# must precede broader ones (e.g. package-management).
 CATEGORY_PATTERNS: dict[str, list[str]] = {
     "git-workflow": [r"\bgit\b", r"\bgh\b"],
     "deployment": [r"\bkubectl\b", r"\bhelm\b", r"\bterraform\b"],
