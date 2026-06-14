@@ -36,8 +36,21 @@ class TestRedactSensitiveText:
     def test_key_value_secrets_redacted(self, text: str) -> None:
         result = redact_sensitive_text(text)
         assert REDACTED_MARKER in result
-        # The original secret value must not survive
-        assert "supersecret" not in result or "sk_live" not in result or "hunter2" not in result
+
+    # -- Multi-token unquoted values (Pattern 1 extended to end of line) --
+    @pytest.mark.parametrize(
+        "text",
+        [
+            "password = supersecret extra stuff",
+            "TOKEN = abc123 def456 ghi789",
+        ],
+    )
+    def test_multi_token_value_redacted(self, text: str) -> None:
+        result = redact_sensitive_text(text)
+        assert REDACTED_MARKER in result
+        # No words after the first should survive
+        for word in text.split("=", 1)[-1].strip().split():
+            assert word not in result, f"{word} leaked through"
 
     # -- Pattern 2: Authorization bearer tokens --
     @pytest.mark.parametrize(
@@ -90,6 +103,19 @@ class TestRedactSensitiveText:
         result = redact_sensitive_text(text)
         assert REDACTED_MARKER in result
         assert "192" not in result and "10." not in result
+
+    # -- IP patterns should NOT match version strings (false positive prevention) --
+    @pytest.mark.parametrize(
+        "text",
+        [
+            "version 1.0.0.1 released",
+            "npm package 2.1.3.4",
+            "pip install 3.0.0.0",
+        ],
+    )
+    def test_version_string_not_redacted(self, text: str) -> None:
+        result = redact_sensitive_text(text)
+        assert REDACTED_MARKER not in result
 
     # -- Pattern 6: Database Connection Strings --
     @pytest.mark.parametrize(
@@ -170,6 +196,19 @@ class TestRedactSensitiveText:
         assert "my_secret_password" not in result
         assert "another_secret_val" not in result
 
+    # -- Pattern 13: Gemini / Google API Keys --
+    @pytest.mark.parametrize(
+        "text",
+        [
+            "TERMINUX_GEMINI_API_KEY=AIzaSyDf9c8d7e6f5a4b3c2d1e0f",
+            "key: AIzaSyABCDEFGHIJKLMNOPQRSTUVWXYZ0123456",
+            "AIzaSy123456789abcdefghijklmnopqrstuvwxyz",
+        ],
+    )
+    def test_gemini_api_key_redacted(self, text: str) -> None:
+        result = redact_sensitive_text(text)
+        assert REDACTED_MARKER in result
+
     # -- Safe text should survive unmodified --
     @pytest.mark.parametrize(
         "text",
@@ -189,7 +228,13 @@ class TestRedactSensitiveText:
             "and ghp_longpersonalaccesstoken12 and sk-openaikey1234567890abcdef"
         )
         result = redact_sensitive_text(text)
-        assert result.count(REDACTED_MARKER) >= 3  # At least three distinct patterns
+        assert REDACTED_MARKER in result
+        # With end-of-line matching, one Pattern 1 match can consume adjacent
+        # key=value pairs; the important thing is no secret values survive.
+        assert "abc123" not in result
+        assert "xyz789" not in result
+        assert "ghp_longpersonalaccesstoken12" not in result
+        assert "sk-openaikey1234567890abcdef" not in result
 
     def test_multiline_redaction(self) -> None:
         text = "line1\nAPI_KEY=secret_val\nline3"
