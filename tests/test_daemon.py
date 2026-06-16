@@ -18,6 +18,12 @@ import pytest
 
 ROOT_DIR = Path(__file__).resolve().parent.parent
 DAEMON_BIN = ROOT_DIR / "daemon" / "target" / "debug" / "terminux-daemon"
+_BINARY_EXISTS = DAEMON_BIN.exists()
+
+pytestmark = pytest.mark.skipif(
+    not _BINARY_EXISTS,
+    reason=f"Rust daemon binary not found at {DAEMON_BIN}; run `cargo build` in daemon/",
+)
 
 
 # ---------------------------------------------------------------------------
