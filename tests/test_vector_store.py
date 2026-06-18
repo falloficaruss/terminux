@@ -3,10 +3,10 @@
 VectorStore uses SQLite as a local vector database, which operates out-of-the-box
 without any external services.
 """
+
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any
 
 import pytest
 
@@ -19,6 +19,7 @@ from app.vector_store import VectorHit, VectorStore
 @dataclass
 class _DisabledSettings:
     """Minimal Settings lookalike with vector store turned off."""
+
     sqlite_path: str = ":memory:"
     vector_store_enabled: bool = False
     session_gap_seconds: int = 1200
@@ -38,6 +39,7 @@ class _DisabledSettings:
 @dataclass
 class _EnabledSettings:
     """Minimal Settings lookalike with vector store turned on."""
+
     sqlite_path: str = ":memory:"
     vector_store_enabled: bool = True
     session_gap_seconds: int = 1200
@@ -155,7 +157,9 @@ class TestVectorStoreEnabled:
         )
 
         # Similar failure in /proj1 should find event 10
-        hit = await vs.find_similar_failure(command="make", project_root="/proj1", threshold=0.3)
+        hit = await vs.find_similar_failure(
+            command="make", project_root="/proj1", threshold=0.3
+        )
         assert hit is not None
         assert hit.point_id == "10"
 

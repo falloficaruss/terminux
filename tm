@@ -9,6 +9,7 @@ from datetime import datetime
 from typing import Any
 
 import httpx
+import time
 from rich.console import Console
 from rich.panel import Panel
 from rich.table import Table
@@ -21,11 +22,24 @@ err_console = Console(stderr=True)
 
 def _request(method: str, path: str, **kwargs: Any) -> Any:
     url = f"{API_URL}{path}"
-    with httpx.Client(timeout=20.0) as client:
-        response = client.request(method=method, url=url, **kwargs)
-    if response.status_code >= 400:
-        raise RuntimeError(f"{response.status_code} {response.text}")
-    return response.json()
+    last_exc: Exception | None = None
+    for attempt in range(3):
+        try:
+            with httpx.Client(
+                timeout=httpx.Timeout(connect=5.0, read=60.0, write=10.0, pool=5.0),
+            ) as client:
+                response = client.request(method=method, url=url, **kwargs)
+            if response.status_code >= 400:
+                raise RuntimeError(f"{response.status_code} {response.text}")
+            return response.json()
+        except httpx.ConnectError as exc:
+            last_exc = exc
+            if attempt < 2:
+                time.sleep(1 * (2**attempt))
+    raise RuntimeError(
+        f"Failed to connect to Terminux API at {API_URL}. "
+        f"Is the backend running? (last error: {last_exc})"
+    )
 
 
 def _format_ts(iso: str | None) -> str:
@@ -286,7 +300,7 @@ def cmd_correct(args: argparse.Namespace) -> int:
     if args.root_cause is not None:
         payload["root_cause"] = args.root_cause
 
-    data = _request("PATCH", f"/v1/events/{args.event_id}", json=payload)
+    data = _request("PATCH", f"/v1/events/{args.event_id}/correction", json=payload)
 
     if args.json:
         print(json.dumps(data, indent=2))
@@ -384,10 +398,27 @@ def build_parser() -> argparse.ArgumentParser:
     return parser
 
 
+def _check_backend() -> None:
+    """Quick health-check with a short connect timeout. Raises on failure."""
+    url = f"{API_URL}/health"
+    try:
+        with httpx.Client(timeout=httpx.Timeout(connect=3.0, read=5.0)) as client:
+            response = client.get(url)
+        if response.status_code >= 400:
+            raise RuntimeError(f"Backend unhealthy: {response.status_code} {response.text}")
+    except httpx.ConnectError as exc:
+        raise RuntimeError(
+            f"Could not reach Terminux API at {API_URL}. "
+            f"Start the backend first. (error: {exc})"
+        ) from exc
+
+
 def main() -> int:
     parser = build_parser()
     args = parser.parse_args()
     try:
+        if args.command != "status":
+            _check_backend()
         return int(args.func(args))
     except Exception as exc:
         err_console.print(f"[bold red]error:[/bold red] {exc}")

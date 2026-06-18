@@ -17,7 +17,9 @@ class SynthesisEngine:
         self._cfg = cfg
         self._client = httpx.AsyncClient(timeout=cfg.synthesis_timeout_seconds)
 
-    async def synthesize_answer(self, query: str, items: list[RecallItem]) -> str | None:
+    async def synthesize_answer(
+        self, query: str, items: list[RecallItem]
+    ) -> str | None:
         if not self._cfg.gemini_api_key:
             logger.warning("Synthesis disabled: TERMINUX_GEMINI_API_KEY missing.")
             return None
@@ -41,7 +43,7 @@ class SynthesisEngine:
         context = "\n\n".join(context_parts)
         return (
             f"You are Terminux, an AI memory layer for a Linux terminal. "
-            f"The user is asking: \"{query}\"\n\n"
+            f'The user is asking: "{query}"\n\n'
             f"Based on the following retrieved terminal history, provide a concise, natural language answer. "
             f"If the history reveals a specific fix or root cause for a problem, highlight it. "
             f"If the history is not relevant to the question, state that clearly.\n\n"

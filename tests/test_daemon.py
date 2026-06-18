@@ -3,6 +3,7 @@
 Spawns the compiled Rust binary in a subprocess and asserts that it correctly
 sends HTTP POST payloads to the Terminux API.
 """
+
 from __future__ import annotations
 
 import json

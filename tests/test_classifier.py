@@ -3,6 +3,7 @@
 The classifier is regex-based and can silently miscategorize.
 These tests pin the expected behaviour and expose known edge cases.
 """
+
 from __future__ import annotations
 
 import pytest
@@ -141,7 +142,9 @@ class TestClassifyEventEdgeCases:
     def test_pip_in_pipeline_false_positive(self) -> None:
         """'pip' in '|pip' would match \\bpip\\b since '|' is a boundary.
         Documents this gotcha."""
-        assert classify_event("cat reqs.txt |pip install -r -", "") == "package-management"
+        assert (
+            classify_event("cat reqs.txt |pip install -r -", "") == "package-management"
+        )
 
     def test_priority_ordering(self) -> None:
         """When a command matches multiple categories, the first-declared wins.
@@ -168,14 +171,20 @@ class TestLikelyRootCause:
             ("port is already allocated", "port conflict", "high"),
             ("Permission denied", "permission issue", "high"),
             ("connection refused", "service unavailable", "high"),
-            ("ModuleNotFoundError: No module named 'foo'", "missing dependency", "high"),
+            (
+                "ModuleNotFoundError: No module named 'foo'",
+                "missing dependency",
+                "high",
+            ),
             ("module not found: bar", "missing dependency", "high"),
             ("401 Authentication required", "authentication failure", "medium"),
             ("HTTP 401 Unauthorized", "authentication failure", "medium"),
             ("cp: no such file or directory: /x", "missing file or path", "high"),
         ],
     )
-    def test_known_causes(self, output: str, expected_cause: str, expected_confidence: str) -> None:
+    def test_known_causes(
+        self, output: str, expected_cause: str, expected_confidence: str
+    ) -> None:
         cause, confidence = likely_root_cause(output)
         assert cause == expected_cause
         assert confidence == expected_confidence

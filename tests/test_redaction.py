@@ -3,6 +3,7 @@
 Covers both free-text redaction and environment-dict redaction,
 including the four compiled regex patterns and the env-key heuristic.
 """
+
 from __future__ import annotations
 
 import pytest
@@ -186,9 +187,9 @@ class TestRedactSensitiveText:
         "text",
         [
             "password = 'my_secret_password'",
-            "secret: \"another_secret_val\"",
-            "API_KEY = \"my-api-key-123\"",
-        ]
+            'secret: "another_secret_val"',
+            'API_KEY = "my-api-key-123"',
+        ],
     )
     def test_quoted_secret_assignment_redacted(self, text: str) -> None:
         result = redact_sensitive_text(text)

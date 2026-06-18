@@ -3,12 +3,12 @@
 Focuses on session-gap logic, project-root anchoring, event storage,
 failure-fix bookkeeping, and the cross-session failure lookup.
 """
+
 from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
-import pytest
 
 from app.db import Store, find_project_root, to_iso, parse_iso, utc_now
 
@@ -16,6 +16,7 @@ from app.db import Store, find_project_root, to_iso, parse_iso, utc_now
 # ---------------------------------------------------------------------------
 # Helpers
 BASE_TIME = utc_now()
+
 
 def _ts(minutes_offset: int = 0, base: datetime | None = None) -> datetime:
     """Return a UTC datetime offset by *minutes_offset* from *base*."""
@@ -249,9 +250,13 @@ class TestFailureDetection:
         # Session 1
         _add(store, command="deploy", exit_code=1, project_root=root, event_time=_ts(0))
         # Session 2 (gap exceeded)
-        _add(store, command="deploy", exit_code=0, project_root=root, event_time=_ts(25))
+        _add(
+            store, command="deploy", exit_code=0, project_root=root, event_time=_ts(25)
+        )
 
-        failure = store.find_recent_failure_cross_session(root, "deploy", hours_lookback=48)
+        failure = store.find_recent_failure_cross_session(
+            root, "deploy", hours_lookback=48
+        )
         assert failure is not None
         assert failure["exit_code"] == 1
 
@@ -391,14 +396,24 @@ class TestEventCorrection:
         assert updated["command"] == "echo hi"  # unchanged
 
     def test_correct_root_cause(self, store: Store) -> None:
-        eid, _ = _add(store, command="build", root_cause="port conflict", event_time=_ts(0))
+        eid, _ = _add(
+            store, command="build", root_cause="port conflict", event_time=_ts(0)
+        )
         updated = store.update_event_correction(eid, root_cause="permission issue")
         assert updated is not None
         assert updated["root_cause"] == "permission issue"
 
     def test_correct_both(self, store: Store) -> None:
-        eid, _ = _add(store, command="build", category="container", root_cause="port conflict", event_time=_ts(0))
-        updated = store.update_event_correction(eid, category="deployment", root_cause="auth failure")
+        eid, _ = _add(
+            store,
+            command="build",
+            category="container",
+            root_cause="port conflict",
+            event_time=_ts(0),
+        )
+        updated = store.update_event_correction(
+            eid, category="deployment", root_cause="auth failure"
+        )
         assert updated["category"] == "deployment"
         assert updated["root_cause"] == "auth failure"
 

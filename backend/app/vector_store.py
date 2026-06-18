@@ -103,7 +103,9 @@ class VectorStore:
     def embedding_dim(self) -> int:
         return self._embedder.dim
 
-    async def upsert_event_memory(self, event_id: int, text: str, payload: dict[str, Any]) -> None:
+    async def upsert_event_memory(
+        self, event_id: int, text: str, payload: dict[str, Any]
+    ) -> None:
         if not self._enabled or not self._conn:
             return
 
@@ -166,7 +168,9 @@ class VectorStore:
 
         return True
 
-    async def search(self, query: str, limit: int, query_filter: Any = None) -> list[VectorHit]:
+    async def search(
+        self, query: str, limit: int, query_filter: Any = None
+    ) -> list[VectorHit]:
         if not self._enabled or not self._conn:
             return []
 
@@ -174,7 +178,9 @@ class VectorStore:
             query_vector = await self._embedder.embed_text(query)
 
             # Fetch all stored vectors
-            rows = self._conn.execute("SELECT event_id, vector, payload FROM event_vectors").fetchall()
+            rows = self._conn.execute(
+                "SELECT event_id, vector, payload FROM event_vectors"
+            ).fetchall()
 
             hits: list[VectorHit] = []
             for row in rows:
@@ -215,22 +221,30 @@ class VectorStore:
 
         query_filter = models.Filter(
             must_not=[
-                models.FieldCondition(key="exit_code", match=models.MatchValue(value=0)),
+                models.FieldCondition(
+                    key="exit_code", match=models.MatchValue(value=0)
+                ),
             ]
         )
         return await self.search(query=query, limit=limit, query_filter=query_filter)
 
-    async def find_similar_failure(self, command: str, project_root: str, threshold: float = 0.8) -> VectorHit | None:
+    async def find_similar_failure(
+        self, command: str, project_root: str, threshold: float = 0.8
+    ) -> VectorHit | None:
         if not self._enabled or not self._conn:
             return None
 
         # Build filter for failures in the same project
         query_filter = models.Filter(
             must=[
-                models.FieldCondition(key="project_root", match=models.MatchValue(value=project_root)),
+                models.FieldCondition(
+                    key="project_root", match=models.MatchValue(value=project_root)
+                ),
             ],
             must_not=[
-                models.FieldCondition(key="exit_code", match=models.MatchValue(value=0)),
+                models.FieldCondition(
+                    key="exit_code", match=models.MatchValue(value=0)
+                ),
             ],
         )
 

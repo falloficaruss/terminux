@@ -3,6 +3,7 @@
 Exercises the full POST /v1/events -> classify -> embed -> upsert pipeline
 end-to-end using FastAPI's TestClient with isolated in-memory stores.
 """
+
 from __future__ import annotations
 
 import os

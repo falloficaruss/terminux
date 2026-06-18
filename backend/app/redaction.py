@@ -12,8 +12,12 @@ REDACTION_PATTERNS = [
     re.compile(r"(?i)[a-z0-9+.-]+://[^:\s\"']+:[^@\s\"']+@[^\s\"']+"),
     re.compile(r"\b(?:AKIA|ASIA|AGPA|AIDA|AROA|AIPA|ANPA|ANVA)[A-Z0-9]{16}\b"),
     re.compile(r"\beyJ[a-zA-Z0-9_-]+\.[a-zA-Z0-9_-]+\.[a-zA-Z0-9_-]+\b"),
-    re.compile(r"(?s)-----BEGIN [A-Z ]+ PRIVATE KEY-----.+?-----END [A-Z ]+ PRIVATE KEY-----"),
-    re.compile(r"https://hooks\.slack\.com/services/[A-Za-z0-9_]+/[A-Za-z0-9_]+/[A-Za-z0-9_]+"),
+    re.compile(
+        r"(?s)-----BEGIN [A-Z ]+ PRIVATE KEY-----.+?-----END [A-Z ]+ PRIVATE KEY-----"
+    ),
+    re.compile(
+        r"https://hooks\.slack\.com/services/[A-Za-z0-9_]+/[A-Za-z0-9_]+/[A-Za-z0-9_]+"
+    ),
     re.compile(r"https://discord(?:app)?\.com/api/webhooks/\d+/[A-Za-z0-9_-]+"),
     re.compile(r"\bAIzaSy[A-Za-z0-9_-]{20,}\b"),
 ]
@@ -36,7 +40,9 @@ def redact_environment(env: dict[str, str] | None) -> dict[str, str]:
     redacted: dict[str, str] = {}
     for key, value in env.items():
         normalized_key = key.upper()
-        if any(token in normalized_key for token in ["KEY", "TOKEN", "SECRET", "PASSWORD"]):
+        if any(
+            token in normalized_key for token in ["KEY", "TOKEN", "SECRET", "PASSWORD"]
+        ):
             redacted[key] = REDACTED_MARKER
             continue
         redacted[key] = redact_sensitive_text(value)

@@ -43,14 +43,18 @@ class EmbeddingEngine:
     def __init__(self, cfg: Settings) -> None:
         self._cfg = cfg
         requested = cfg.embedding_backend.strip().lower()
-        self._requested_backend = requested if requested in SUPPORTED_BACKENDS else "gemini"
+        self._requested_backend = (
+            requested if requested in SUPPORTED_BACKENDS else "gemini"
+        )
         self._runtime_backend = self._requested_backend
         self._degraded_at: float | None = None
         self._client = httpx.AsyncClient(timeout=cfg.embedding_timeout_seconds)
 
     async def initialize(self) -> None:
         if self._runtime_backend == "gemini" and not self._cfg.gemini_api_key:
-            logger.warning("TERMINUX_GEMINI_API_KEY missing. Attempting fallback to ollama.")
+            logger.warning(
+                "TERMINUX_GEMINI_API_KEY missing. Attempting fallback to ollama."
+            )
             self._runtime_backend = "ollama"
 
         if self._runtime_backend == "ollama":
@@ -59,7 +63,9 @@ class EmbeddingEngine:
                 resp = await self._client.get(url)
                 resp.raise_for_status()
             except Exception as exc:
-                logger.warning("Ollama backend unavailable (%s). Falling back to hash.", exc)
+                logger.warning(
+                    "Ollama backend unavailable (%s). Falling back to hash.", exc
+                )
                 self._runtime_backend = "hash"
 
     async def _maybe_restore_backend(self) -> None:
@@ -100,7 +106,9 @@ class EmbeddingEngine:
             try:
                 return await self._embed_with_gemini(text)
             except Exception as exc:
-                logger.warning("Gemini embeddings failed (%s). Falling back to ollama.", exc)
+                logger.warning(
+                    "Gemini embeddings failed (%s). Falling back to ollama.", exc
+                )
                 self._runtime_backend = "ollama"
                 self._degraded_at = time.monotonic()
 
@@ -108,7 +116,9 @@ class EmbeddingEngine:
             try:
                 return await self._embed_with_ollama(text)
             except Exception as exc:
-                logger.warning("Ollama embeddings failed (%s). Falling back to hash backend.", exc)
+                logger.warning(
+                    "Ollama embeddings failed (%s). Falling back to hash backend.", exc
+                )
                 self._runtime_backend = "hash"
                 self._degraded_at = time.monotonic()
 

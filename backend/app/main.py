@@ -53,7 +53,9 @@ async def lifespan(app: FastAPI):
 
 
 app = FastAPI(title="Terminux Memory API", version="0.1.0", lifespan=lifespan)
-store = Store(sqlite_path=settings.sqlite_path, session_gap_seconds=settings.session_gap_seconds)
+store = Store(
+    sqlite_path=settings.sqlite_path, session_gap_seconds=settings.session_gap_seconds
+)
 vector_store = VectorStore(settings)
 synthesis_engine = SynthesisEngine(settings)
 
@@ -97,7 +99,9 @@ async def ingest_event(payload: EventIn) -> EventOut:
     redacted_output = redact_sensitive_text(payload.output or "")
     redacted_env = redact_environment(payload.env)
     category = classify_event(redacted_command, redacted_output)
-    root_cause, root_cause_confidence = likely_root_cause(redacted_output) if payload.exit_code != 0 else (None, None)
+    root_cause, root_cause_confidence = (
+        likely_root_cause(redacted_output) if payload.exit_code != 0 else (None, None)
+    )
 
     project_root = find_project_root(payload.cwd)
     event_id, session_id = await asyncio.to_thread(
@@ -135,16 +139,20 @@ async def ingest_event(payload: EventIn) -> EventOut:
 
     if payload.exit_code == 0:
         failure = None
-        
+
         # 1. Try semantic match across sessions (if enabled)
         if vector_store.enabled:
-            similar = await vector_store.find_similar_failure(command=payload.command, project_root=project_root)
+            similar = await vector_store.find_similar_failure(
+                command=payload.command, project_root=project_root
+            )
             if similar:
                 failure = store.get_event(int(similar.payload["event_id"]))
-        
+
         # 2. Fallback to cross-session exact match (works even if vector store is disabled)
         if failure is None:
-            failure = store.find_recent_failure_cross_session(project_root=project_root, command=payload.command)
+            failure = store.find_recent_failure_cross_session(
+                project_root=project_root, command=payload.command
+            )
 
         if failure is not None and int(failure["id"]) != event_id:
             prior_root_cause = failure["root_cause"] or "unknown cause"
@@ -156,13 +164,20 @@ async def ingest_event(payload: EventIn) -> EventOut:
                 summary=summary,
             )
 
-    return EventOut(event_id=event_id, session_id=session_id, category=category, captured_at=event_time)
+    return EventOut(
+        event_id=event_id,
+        session_id=session_id,
+        category=category,
+        captured_at=event_time,
+    )
 
 
 @app.patch("/v1/events/{event_id}/correction", response_model=CorrectionResponse)
 def correct_event(event_id: int, correction: CorrectionRequest) -> CorrectionResponse:
     if correction.category is None and correction.root_cause is None:
-        raise HTTPException(status_code=400, detail="Provide at least one of: category, root_cause")
+        raise HTTPException(
+            status_code=400, detail="Provide at least one of: category, root_cause"
+        )
 
     updated = store.update_event_correction(
         event_id=event_id,
@@ -184,7 +199,11 @@ def correct_event(event_id: int, correction: CorrectionRequest) -> CorrectionRes
     if fields:
         vector_store.set_payload_fields(event_id, fields)
 
-    message = f"Corrected event {event_id}: {', '.join(changed)}" if changed else "No changes applied"
+    message = (
+        f"Corrected event {event_id}: {', '.join(changed)}"
+        if changed
+        else "No changes applied"
+    )
     return CorrectionResponse(
         event_id=int(updated["id"]),
         session_id=int(updated["session_id"]),
@@ -218,7 +237,9 @@ async def recall(
                 score=float(hit.score),
                 category=event["category"],
                 command=event["command"],
-                summary=_event_to_summary(event["command"], event["output"], event["root_cause"]),
+                summary=_event_to_summary(
+                    event["command"], event["output"], event["root_cause"]
+                ),
                 timestamp=parse_iso(event["captured_at"]),
             )
         )
@@ -237,7 +258,9 @@ async def recall(
                     score=0.25,
                     category=row["category"],
                     command=row["command"],
-                    summary=_event_to_summary(row["command"], row["output"], row["root_cause"]),
+                    summary=_event_to_summary(
+                        row["command"], row["output"], row["root_cause"]
+                    ),
                     timestamp=parse_iso(row["captured_at"]),
                 )
             )
@@ -257,7 +280,9 @@ def replay_session(
     query: str | None = Query(default=None, min_length=2),
 ) -> ReplaySessionResponse:
     if session_id is None and query is None:
-        raise HTTPException(status_code=400, detail="Provide either session_id or query")
+        raise HTTPException(
+            status_code=400, detail="Provide either session_id or query"
+        )
 
     session_row = store.get_session(session_id) if session_id is not None else None
     if session_row is None and query is not None:
@@ -333,17 +358,25 @@ async def preflight(payload: PreflightRequest) -> PreflightResponse:
 
         # Use the best hit's payload for the message
         best_hit = max(relevant, key=lambda h: h.score)
-        root_cause = best_hit.payload.get("root_cause") or best_hit.payload.get("summary") or "prior failures detected"
-        warnings.append({
-            "severity": severity,
-            "message": f"Semantically related failures found for '{term}': {root_cause}",
-            "evidence_event_ids": evidence_ids,
-        })
+        root_cause = (
+            best_hit.payload.get("root_cause")
+            or best_hit.payload.get("summary")
+            or "prior failures detected"
+        )
+        warnings.append(
+            {
+                "severity": severity,
+                "message": f"Semantically related failures found for '{term}': {root_cause}",
+                "evidence_event_ids": evidence_ids,
+            }
+        )
 
     # 2. SQLite LIKE fallback for terms that had no semantic hits
     fallback_terms = [t for t in terms if t not in terms_with_semantic_hits]
     if fallback_terms:
-        like_warnings = store.preflight_warnings(task=fallback_terms[0], commands=fallback_terms[1:])
+        like_warnings = store.preflight_warnings(
+            task=fallback_terms[0], commands=fallback_terms[1:]
+        )
         for w in like_warnings:
             w_ids = set(w.get("evidence_event_ids", []))
             if not w_ids - seen_event_ids:
@@ -355,14 +388,18 @@ async def preflight(payload: PreflightRequest) -> PreflightResponse:
 
 
 @app.get("/v1/weekly-report", response_model=WeeklyReportResponse)
-async def weekly_report(days: int = Query(default=7, ge=1, le=90)) -> WeeklyReportResponse:
+async def weekly_report(
+    days: int = Query(default=7, ge=1, le=90),
+) -> WeeklyReportResponse:
     stats = store.weekly_stats(days=days)
     return WeeklyReportResponse(
         period_days=stats["period_days"],
         total_events=stats["total_events"],
         total_failures=stats["total_failures"],
         failure_rate=stats["failure_rate"],
-        top_categories=[WeeklyCategoryStats(**category) for category in stats["top_categories"]],
+        top_categories=[
+            WeeklyCategoryStats(**category) for category in stats["top_categories"]
+        ],
         recurring_failures=stats["recurring_failures"],
     )
 

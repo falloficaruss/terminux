@@ -27,12 +27,14 @@ def find_project_root(path: str) -> str:
         current = Path(path).resolve()
         for parent in [current, *current.parents]:
             # Check for common project markers
-            if (parent / ".git").exists() or \
-               (parent / ".hg").exists() or \
-               (parent / "package.json").exists() or \
-               (parent / "pyproject.toml").exists() or \
-               (parent / "go.mod").exists() or \
-               (parent / "Cargo.toml").exists():
+            if (
+                (parent / ".git").exists()
+                or (parent / ".hg").exists()
+                or (parent / "package.json").exists()
+                or (parent / "pyproject.toml").exists()
+                or (parent / "go.mod").exists()
+                or (parent / "Cargo.toml").exists()
+            ):
                 return str(parent)
         return str(current)
     except Exception:
@@ -92,15 +94,17 @@ class Store:
             try:
                 self.conn.execute("ALTER TABLE sessions ADD COLUMN project_root TEXT")
             except sqlite3.OperationalError:
-                pass # Already exists
+                pass  # Already exists
             try:
                 self.conn.execute("ALTER TABLE events ADD COLUMN project_root TEXT")
             except sqlite3.OperationalError:
-                pass # Already exists
+                pass  # Already exists
             try:
-                self.conn.execute("ALTER TABLE events ADD COLUMN root_cause_confidence TEXT")
+                self.conn.execute(
+                    "ALTER TABLE events ADD COLUMN root_cause_confidence TEXT"
+                )
             except sqlite3.OperationalError:
-                pass # Already exists
+                pass  # Already exists
 
             self.conn.executescript(
                 """
@@ -222,7 +226,9 @@ class Store:
             event_id = int(cursor.lastrowid)
             return event_id, session_id
 
-    def recent_session_events(self, session_id: int, limit: int = 50) -> list[sqlite3.Row]:
+    def recent_session_events(
+        self, session_id: int, limit: int = 50
+    ) -> list[sqlite3.Row]:
         with self.lock:
             rows = self.conn.execute(
                 """
@@ -236,18 +242,32 @@ class Store:
             ).fetchall()
             return list(reversed(rows))
 
-    def add_failure_fix(self, session_id: int, failure_event_id: int, success_event_id: int, summary: str) -> None:
+    def add_failure_fix(
+        self,
+        session_id: int,
+        failure_event_id: int,
+        success_event_id: int,
+        summary: str,
+    ) -> None:
         with self.lock:
             self.conn.execute(
                 """
                 INSERT INTO failure_fixes (session_id, failure_event_id, success_event_id, summary, created_at)
                 VALUES (?, ?, ?, ?, ?)
                 """,
-                (session_id, failure_event_id, success_event_id, summary, to_iso(utc_now())),
+                (
+                    session_id,
+                    failure_event_id,
+                    success_event_id,
+                    summary,
+                    to_iso(utc_now()),
+                ),
             )
             self.conn.commit()
 
-    def find_recent_failure_for_command(self, session_id: int, command: str) -> sqlite3.Row | None:
+    def find_recent_failure_for_command(
+        self, session_id: int, command: str
+    ) -> sqlite3.Row | None:
         with self.lock:
             return self.conn.execute(
                 """
@@ -262,7 +282,9 @@ class Store:
                 (session_id, command),
             ).fetchone()
 
-    def find_recent_failure_cross_session(self, project_root: str, command: str, hours_lookback: int = 48) -> sqlite3.Row | None:
+    def find_recent_failure_cross_session(
+        self, project_root: str, command: str, hours_lookback: int = 48
+    ) -> sqlite3.Row | None:
         with self.lock:
             cutoff = to_iso(utc_now() - timedelta(hours=hours_lookback))
             return self.conn.execute(
@@ -281,7 +303,9 @@ class Store:
 
     def get_event(self, event_id: int) -> sqlite3.Row | None:
         with self.lock:
-            return self.conn.execute("SELECT * FROM events WHERE id = ?", (event_id,)).fetchone()
+            return self.conn.execute(
+                "SELECT * FROM events WHERE id = ?", (event_id,)
+            ).fetchone()
 
     def update_event_correction(
         self,
@@ -290,7 +314,9 @@ class Store:
         root_cause: str | None = None,
     ) -> sqlite3.Row | None:
         with self.lock:
-            event = self.conn.execute("SELECT * FROM events WHERE id = ?", (event_id,)).fetchone()
+            event = self.conn.execute(
+                "SELECT * FROM events WHERE id = ?", (event_id,)
+            ).fetchone()
             if event is None:
                 return None
 
@@ -313,7 +339,9 @@ class Store:
                 params,
             )
             self.conn.commit()
-            return self.conn.execute("SELECT * FROM events WHERE id = ?", (event_id,)).fetchone()
+            return self.conn.execute(
+                "SELECT * FROM events WHERE id = ?", (event_id,)
+            ).fetchone()
 
     def search_events_like(self, query: str, limit: int) -> list[sqlite3.Row]:
         with self.lock:
@@ -332,7 +360,9 @@ class Store:
 
     def get_session(self, session_id: int) -> sqlite3.Row | None:
         with self.lock:
-            return self.conn.execute("SELECT * FROM sessions WHERE id = ?", (session_id,)).fetchone()
+            return self.conn.execute(
+                "SELECT * FROM sessions WHERE id = ?", (session_id,)
+            ).fetchone()
 
     def find_session_by_query(self, query: str) -> sqlite3.Row | None:
         with self.lock:
@@ -400,7 +430,9 @@ class Store:
                 "period_days": days,
                 "total_events": total_events,
                 "total_failures": total_failures,
-                "failure_rate": (float(total_failures) / total_events) if total_events else 0.0,
+                "failure_rate": (float(total_failures) / total_events)
+                if total_events
+                else 0.0,
                 "top_categories": [
                     {
                         "category": row["category"],
@@ -412,7 +444,9 @@ class Store:
                 "recurring_failures": [row["command"] for row in recurring_rows],
             }
 
-    def preflight_warnings(self, task: str, commands: list[str]) -> list[dict[str, Any]]:
+    def preflight_warnings(
+        self, task: str, commands: list[str]
+    ) -> list[dict[str, Any]]:
         with self.lock:
             terms = [task, *commands]
             warnings: list[dict[str, Any]] = []
@@ -431,7 +465,10 @@ class Store:
                 if not rows:
                     continue
 
-                cause = next((row["root_cause"] for row in rows if row["root_cause"]), "prior failures detected")
+                cause = next(
+                    (row["root_cause"] for row in rows if row["root_cause"]),
+                    "prior failures detected",
+                )
                 warnings.append(
                     {
                         "severity": "medium",
