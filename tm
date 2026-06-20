@@ -1,9 +1,10 @@
-#!/usr/bin/env python3
+#!/home/falloficaruss/miniforge3/envs/dev/bin/python3
 from __future__ import annotations
 
 import argparse
 import json
 import os
+import re
 import sys
 from datetime import datetime
 from typing import Any
@@ -76,6 +77,23 @@ def _exit_code_style(code: int) -> str:
     return "green" if code == 0 else "bold red"
 
 
+_INLINE_MD = re.compile(r'`([^`]+)`|\*\*([^*]+)\*\*')
+
+
+def _render_inline(text: str) -> Text:
+    result = Text()
+    last = 0
+    for m in _INLINE_MD.finditer(text):
+        result.append(text[last:m.start()])
+        if m.group(1):
+            result.append(m.group(1), style="bold cyan")
+        else:
+            result.append(m.group(2), style="bold")
+        last = m.end()
+    result.append(text[last:])
+    return result
+
+
 # ── recall ────────────────────────────────────────────────────────
 def cmd_recall(args: argparse.Namespace) -> int:
     data = _request("GET", "/v1/recall", params={"query": args.query, "limit": args.limit})
@@ -84,48 +102,65 @@ def cmd_recall(args: argparse.Namespace) -> int:
         print(json.dumps(data, indent=2))
         return 0
 
-    # Synthesis panel
-    answer = data.get("answer")
-    if answer:
-        console.print()
-        console.print(Panel(
-            answer,
-            title="[bold cyan]Synthesis[/bold cyan]",
-            border_style="cyan",
-            padding=(1, 2),
-        ))
-
     results = data.get("results", [])
-    if not results:
-        console.print("[dim]No matching events found.[/dim]")
+    answer = data.get("answer")
+
+    if not results and not answer:
+        console.print("[dim]Nothing found for that query.[/dim]")
         return 0
 
-    table = Table(
-        title=f"Recall: [bold]{args.query}[/bold]",
-        show_lines=False,
-        padding=(0, 1),
-        title_style="bold magenta",
-    )
-    table.add_column("Timestamp", style="cyan", no_wrap=True)
-    table.add_column("Category", style="yellow")
-    table.add_column("Command", style="bold white")
-    table.add_column("Summary", style="dim white", max_width=55)
-    table.add_column("Score", justify="right")
+    # ── verbose mode: full technical table ─────────────────────────
+    if args.verbose:
+        if answer:
+            console.print()
+            console.print(Panel(
+                answer,
+                title="[bold cyan]Synthesis[/bold cyan]",
+                border_style="cyan",
+                padding=(1, 2),
+            ))
+        if results:
+            table = Table(
+                title=f"Recall: [bold]{args.query}[/bold]",
+                show_lines=False,
+                padding=(0, 1),
+                title_style="bold magenta",
+            )
+            table.add_column("Timestamp", style="cyan", no_wrap=True)
+            table.add_column("Category", style="yellow")
+            table.add_column("Command", style="bold white")
+            table.add_column("Summary", style="dim white", max_width=55)
+            table.add_column("Score", justify="right")
+            for item in results:
+                score = float(item.get("score", 0))
+                score_text = Text(f"{score:.2f}", style=_score_style(score))
+                table.add_row(
+                    _format_ts(item.get("timestamp")),
+                    item.get("category", "—"),
+                    _truncate(item.get("command", ""), 40),
+                    _truncate(item.get("summary", ""), 55),
+                    score_text,
+                )
+            console.print()
+            console.print(table)
+        console.print()
+        return 0
 
-    for item in results:
-        score = float(item.get("score", 0))
-        score_text = Text(f"{score:.2f}", style=_score_style(score))
-        table.add_row(
-            _format_ts(item.get("timestamp")),
-            item.get("category", "—"),
-            _truncate(item.get("command", ""), 40),
-            _truncate(item.get("summary", ""), 55),
-            score_text,
-        )
+    # ── default: clean conversational output ──────────────────────
+    if answer:
+        console.print()
+        console.print(_render_inline(answer))
 
-    console.print()
-    console.print(table)
-    console.print()
+    if results:
+        seen: set[str] = set()
+        console.print()
+        for item in results:
+            cmd = item.get("command", "")
+            if cmd not in seen:
+                seen.add(cmd)
+                console.print(f"  [bold cyan]{cmd}[/bold cyan]")
+        console.print()
+
     return 0
 
 
@@ -355,6 +390,7 @@ def build_parser() -> argparse.ArgumentParser:
     recall = subparsers.add_parser("recall", help="Recall historical issues and fixes")
     recall.add_argument("query", help="Issue/topic to query")
     recall.add_argument("--limit", type=int, default=5)
+    recall.add_argument("--verbose", "-v", action="store_true", help="Show full technical details (scores, timestamps, categories)")
     recall.add_argument("--json", action="store_true", help="Output raw JSON")
     recall.set_defaults(func=cmd_recall)
 
@@ -402,7 +438,7 @@ def _check_backend() -> None:
     """Quick health-check with a short connect timeout. Raises on failure."""
     url = f"{API_URL}/health"
     try:
-        with httpx.Client(timeout=httpx.Timeout(connect=3.0, read=5.0)) as client:
+        with httpx.Client(timeout=httpx.Timeout(connect=3.0, read=5.0, write=3.0, pool=3.0)) as client:
             response = client.get(url)
         if response.status_code >= 400:
             raise RuntimeError(f"Backend unhealthy: {response.status_code} {response.text}")

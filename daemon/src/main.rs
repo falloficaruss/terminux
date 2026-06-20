@@ -98,6 +98,8 @@ enum SocketMessage {
         seq: u64,
         exit_code: i32,
         duration_ms: Option<i64>,
+        #[serde(default)]
+        output: String,
     },
 }
 
@@ -448,12 +450,13 @@ fn handle_connection(stream: UnixStream, db_path: &PathBuf, notify: &mpsc::Sende
                     seq,
                     exit_code,
                     duration_ms,
+                    output,
                 } => {
                     if let Some(start) = pending_starts.remove(&seq) {
                         let payload = EventPayload {
                             command: start.command,
                             cwd: start.cwd,
-                            output: String::new(),
+                            output,
                             exit_code,
                             duration_ms,
                             timestamp: start.timestamp,

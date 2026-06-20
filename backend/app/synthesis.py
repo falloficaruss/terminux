@@ -37,16 +37,24 @@ class SynthesisEngine:
     def _build_prompt(self, query: str, items: list[RecallItem]) -> str:
         context_parts = []
         for i, item in enumerate(items, 1):
-            part = f"{i}. Command: {item.command}\n   Summary: {item.summary}\n   Time: {item.timestamp.isoformat()}"
+            part = (
+                f"{i}. [relevance={item.score:.2f}] "
+                f"Command: {item.command}\n"
+                f"   Output: {item.summary}\n"
+                f"   Time: {item.timestamp.isoformat()}"
+            )
             context_parts.append(part)
 
         context = "\n\n".join(context_parts)
         return (
-            f"You are Terminux, an AI memory layer for a Linux terminal. "
+            f"You are Terminux, a terminal memory assistant. "
             f'The user is asking: "{query}"\n\n'
-            f"Based on the following retrieved terminal history, provide a concise, natural language answer. "
-            f"If the history reveals a specific fix or root cause for a problem, highlight it. "
-            f"If the history is not relevant to the question, state that clearly.\n\n"
+            f"Below is terminal history retrieved for this query. "
+            f"Each item has a relevance score (0=unrelated, 1=perfect match). "
+            f"ONLY use items with high relevance to answer. "
+            f"If NO item is clearly relevant, say:\n"
+            f"I don't have any information about that in your terminal history.\n\n"
+            f"Do NOT guess, do NOT fabricate information, do NOT connect unrelated context.\n\n"
             f"Retrieved History:\n{context}\n\n"
             f"Answer:"
         )

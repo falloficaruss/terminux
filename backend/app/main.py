@@ -268,8 +268,11 @@ async def recall(
                 break
 
     answer = None
-    if results:
-        answer = await synthesis_engine.synthesize_answer(query=query, items=results)
+    # Only synthesize if at least one result has meaningful relevance
+    RELEVANCE_THRESHOLD = 0.3
+    relevant = [r for r in results if r.score >= RELEVANCE_THRESHOLD]
+    if relevant:
+        answer = await synthesis_engine.synthesize_answer(query=query, items=relevant)
 
     return RecallResponse(query=query, results=results, answer=answer)
 

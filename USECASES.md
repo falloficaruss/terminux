@@ -1,0 +1,6 @@
+- "Why did X fail last time?" — tm recall "docker port conflict" returns the root cause and the fix you used before, without you having to remember or re-search.
+- Debugging session reconstruction — tm replay-session --query "nvidia" shows the timeline: failure → diagnosis commands → eventual fix, with exit codes and outcome.
+- Pre-flight warnings — tm preflight "deploy" warns "you historically broke the DB with this command" before you run it again.
+- Weekly developer analytics — tm weekly-report surfaces recurring failure patterns (e.g., "you hit CUDA OOM 3 times this week"), time sinks, and most-used tool categories.
+- Cross-session failure recovery — detects when a previously failing command succeeds, auto-links the fix so next recall surfaces the full story.
+- Personal knowledge base — builds a searchable, semantic memory of your operational patterns that persists across reboots, projects, and terminal sessions.
