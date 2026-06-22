@@ -1,5 +1,6 @@
 import asyncio
 import logging
+import sqlite3
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone
 from typing import Any
@@ -8,7 +9,7 @@ from fastapi import FastAPI, HTTPException, Query
 
 from .classifier import classify_event, likely_root_cause
 from .config import settings
-from .db import Store, find_project_root, parse_iso, utc_now
+from .db import Store, find_project_root, parse_iso, parse_since_duration, utc_now
 from .redaction import redact_environment, redact_sensitive_text
 from .schemas import (
     CorrectionRequest,
@@ -27,6 +28,7 @@ from .schemas import (
     WeeklyCategoryStats,
     WeeklyReportResponse,
 )
+from .vector_store import Filter, FieldCondition, MatchValue
 from .synthesis import SynthesisEngine
 from .vector_store import VectorStore
 
@@ -213,15 +215,105 @@ def correct_event(event_id: int, correction: CorrectionRequest) -> CorrectionRes
     )
 
 
+def _build_recall_filter(
+    cwd: str | None = None,
+    project_root: str | None = None,
+    category: str | None = None,
+    failures_only: bool = False,
+) -> Filter | None:
+    must: list[FieldCondition] = []
+    must_not: list[FieldCondition] = []
+
+    if cwd is not None:
+        must.append(FieldCondition(key="cwd", match=MatchValue(value=cwd)))
+    if project_root is not None:
+        must.append(FieldCondition(key="project_root", match=MatchValue(value=project_root)))
+    if category is not None:
+        must.append(FieldCondition(key="category", match=MatchValue(value=category)))
+    if failures_only:
+        must_not.append(FieldCondition(key="exit_code", match=MatchValue(value=0)))
+
+    if not must and not must_not:
+        return None
+    return Filter(must=must or None, must_not=must_not or None)
+
+
+_RRF_K = 60
+
+
+def _reciprocal_rank_fusion(
+    vector_hits: list[RecallItem],
+    fts5_hits: list[RecallItem],
+    limit: int,
+) -> list[RecallItem]:
+    rrf_scores: dict[int, tuple[float, RecallItem]] = {}
+
+    for rank, item in enumerate(vector_hits):
+        rrf_scores[item.event_id] = (1.0 / (_RRF_K + rank + 1), item)
+
+    for rank, item in enumerate(fts5_hits):
+        if item.event_id in rrf_scores:
+            existing_score, existing_item = rrf_scores[item.event_id]
+            rrf_scores[item.event_id] = (
+                existing_score + 1.0 / (_RRF_K + rank + 1),
+                existing_item,
+            )
+        else:
+            rrf_scores[item.event_id] = (1.0 / (_RRF_K + rank + 1), item)
+
+    sorted_items = sorted(rrf_scores.values(), key=lambda x: x[0], reverse=True)
+    return [item for score, item in sorted_items[:limit]]
+
+
+def _add_resolution(event_id: int, event: sqlite3.Row, item: RecallItem) -> None:
+    fix_row = store.get_fix_by_failure_id(event_id)
+    direction = "failure"
+    if fix_row is None:
+        fix_row = store.get_fix_by_success_id(event_id)
+        direction = "success"
+
+    if fix_row is not None:
+        item.was_resolved = True
+        if direction == "success":
+            item.resolution_command = fix_row["failure_command"]
+            item.resolution_summary = (
+                f"Prior failure: {fix_row['failure_command']} "
+                f"({fix_row['failure_output'][:100] if fix_row['failure_output'] else 'no output'})"
+            )
+        else:
+            item.resolution_command = fix_row["success_command"]
+            item.resolution_summary = fix_row["summary"]
+
+
 @app.get("/v1/recall", response_model=RecallResponse)
 async def recall(
     query: str = Query(min_length=2),
     limit: int = Query(default=settings.recall_default_limit, ge=1, le=20),
+    cwd: str | None = Query(default=None),
+    project_root: str | None = Query(default=None),
+    category: str | None = Query(default=None),
+    failures_only: bool = Query(default=False),
+    since: str | None = Query(default=None),
 ) -> RecallResponse:
+    since_dt: datetime | None = None
+    if since is not None:
+        try:
+            since_dt = parse_since_duration(since)
+        except ValueError:
+            raise HTTPException(status_code=400, detail=f"Invalid since format: {since!r}")
+
+    vector_filter = _build_recall_filter(
+        cwd=cwd,
+        project_root=project_root,
+        category=category,
+        failures_only=failures_only,
+    )
+
     results: list[RecallItem] = []
     seen: set[int] = set()
 
-    vector_hits = await vector_store.search(query, limit=limit)
+    # 1. Vector search with optional filters
+    vector_hits = await vector_store.search(query, limit=limit, query_filter=vector_filter)
     for hit in vector_hits:
         event_id = int(hit.payload.get("event_id") or hit.point_id)
         if event_id in seen:
@@ -230,45 +322,60 @@ async def recall(
         if event is None:
             continue
         seen.add(event_id)
-        results.append(
-            RecallItem(
-                event_id=event_id,
-                session_id=int(event["session_id"]),
-                score=float(hit.score),
-                category=event["category"],
-                command=event["command"],
-                summary=_event_to_summary(
-                    event["command"], event["output"], event["root_cause"]
-                ),
-                timestamp=parse_iso(event["captured_at"]),
-            )
+        item = RecallItem(
+            event_id=event_id,
+            session_id=int(event["session_id"]),
+            score=float(hit.score),
+            category=event["category"],
+            command=event["command"],
+            summary=_event_to_summary(
+                event["command"], event["output"], event["root_cause"]
+            ),
+            timestamp=parse_iso(event["captured_at"]),
         )
+        _add_resolution(event_id, event, item)
+        results.append(item)
 
+    # 2. FTS5 fallback with same filters
+    fts5_hits: list[RecallItem] = []
     if len(results) < limit:
-        fallback_rows = store.search_events_like(query=query, limit=limit)
-        for row in fallback_rows:
+        fts5_rows = store.search_events_fts5(
+            query=query,
+            limit=limit,
+            cwd=cwd,
+            project_root=project_root,
+            category=category,
+            failures_only=failures_only,
+            since=since_dt,
+        )
+        for row in fts5_rows:
             event_id = int(row["id"])
             if event_id in seen:
                 continue
             seen.add(event_id)
-            results.append(
-                RecallItem(
-                    event_id=event_id,
-                    session_id=int(row["session_id"]),
-                    score=0.25,
-                    category=row["category"],
-                    command=row["command"],
-                    summary=_event_to_summary(
-                        row["command"], row["output"], row["root_cause"]
-                    ),
-                    timestamp=parse_iso(row["captured_at"]),
-                )
+
+            fts_rank = float(row["fts_rank"])
+            fts_score = max(0.0, min(1.0, -fts_rank / 10.0))
+
+            item = RecallItem(
+                event_id=event_id,
+                session_id=int(row["session_id"]),
+                score=fts_score,
+                category=row["category"],
+                command=row["command"],
+                summary=_event_to_summary(
+                    row["command"], row["output"], row["root_cause"]
+                ),
+                timestamp=parse_iso(row["captured_at"]),
             )
-            if len(results) >= limit:
-                break
+            _add_resolution(event_id, row, item)
+            fts5_hits.append(item)
+
+    # 3. RRF merge
+    if fts5_hits:
+        results = _reciprocal_rank_fusion(results, fts5_hits, limit=limit)
 
     answer = None
-    # Only synthesize if at least one result has meaningful relevance
     RELEVANCE_THRESHOLD = 0.3
     relevant = [r for r in results if r.score >= RELEVANCE_THRESHOLD]
     if relevant:

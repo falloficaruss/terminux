@@ -9,10 +9,16 @@ import sys
 from datetime import datetime
 from typing import Any
 
+import subprocess
+import textwrap
+
 import httpx
 import time
 from rich.console import Console
+from rich.markdown import Markdown
 from rich.panel import Panel
+from rich.prompt import Confirm, Prompt
+from rich.syntax import Syntax
 from rich.table import Table
 from rich.text import Text
 
@@ -94,9 +100,144 @@ def _render_inline(text: str) -> Text:
     return result
 
 
+def _detect_project_root() -> str | None:
+    """Detect project root from current directory."""
+    import os
+    cwd = os.getcwd()
+    markers = [".git", ".hg", "package.json", "pyproject.toml", "go.mod", "Cargo.toml"]
+    path = cwd
+    while path:
+        for marker in markers:
+            if os.path.exists(os.path.join(path, marker)):
+                return path
+        parent = os.path.dirname(path)
+        if parent == path:
+            return None
+        path = parent
+    return None
+
+
+def _extract_suggested_command(answer: str) -> str | None:
+    """Extract a suggested bash command from '### Suggested Action' block."""
+    m = re.search(r"### Suggested Action\s*\n```(?:bash)?\s*\n(.+?)\n```", answer, re.DOTALL)
+    if m:
+        return m.group(1).strip()
+    return None
+
+
+def _copy_to_clipboard(text: str) -> bool:
+    """Try to copy text to clipboard using available tools."""
+    try:
+        import pyperclip
+        pyperclip.copy(text)
+        return True
+    except ImportError:
+        pass
+    for prog in ["xclip", "xsel", "wl-copy"]:
+        try:
+            if prog == "xclip":
+                p = subprocess.Popen(["xclip", "-selection", "clipboard"], stdin=subprocess.PIPE)
+            elif prog == "xsel":
+                p = subprocess.Popen(["xsel", "--clipboard", "--input"], stdin=subprocess.PIPE)
+            else:
+                p = subprocess.Popen([prog], stdin=subprocess.PIPE)
+            p.communicate(input=text.encode(), timeout=2)
+            return p.returncode == 0
+        except (FileNotFoundError, subprocess.TimeoutExpired):
+            continue
+    return False
+
+
+def _interactive_prompt(answer: str | None, results: list[dict]) -> None:
+    """Interactive mode: let user copy/run suggested command or choose from history."""
+    suggested = _extract_suggested_command(answer) if answer else None
+    commands = []
+    if suggested:
+        commands.append(("Suggested command", suggested))
+    for item in results:
+        cmd = item.get("command", "")
+        if cmd and cmd != suggested:
+            commands.append((f"Historical: {_truncate(item.get('summary', ''), 50)}", cmd))
+
+    if not commands:
+        console.print("[dim]No commands available for interactive selection.[/dim]")
+        return
+
+    console.print()
+    console.print(Panel.fit("[bold]Interactive Mode[/bold]", border_style="cyan"))
+    for i, (label, cmd) in enumerate(commands, 1):
+        console.print(f"  [bold cyan]{i}.[/bold cyan] {label}")
+        console.print(f"     [dim]{cmd}[/dim]")
+
+    raw = Prompt.ask("Select a command number", default="1")
+    try:
+        idx = int(raw) - 1
+        if idx < 0 or idx >= len(commands):
+            console.print("[red]Invalid selection.[/red]")
+            return
+    except ValueError:
+        console.print("[red]Invalid selection.[/red]")
+        return
+
+    label, selected_cmd = commands[idx]
+    console.print()
+    console.print(Syntax(selected_cmd, "bash", theme="monokai"))
+    console.print()
+
+    action = Prompt.ask(
+        "[bold]Action[/bold]",
+        choices=["run", "copy", "cancel"],
+        default="copy",
+    )
+
+    if action == "run":
+        confirm = Confirm.ask(f"Run this command?", default=False)
+        if confirm:
+            console.print(f"[dim]→ Running: {selected_cmd}[/dim]")
+            result = subprocess.run(selected_cmd, shell=True, capture_output=True, text=True)
+            if result.stdout:
+                console.print(result.stdout)
+            if result.stderr:
+                err_console.print(result.stderr)
+            console.print(f"[bold]{'Exit code: ' + str(result.returncode)}[/bold]")
+    elif action == "copy":
+        if _copy_to_clipboard(selected_cmd):
+            console.print("[green]✓ Copied to clipboard.[/green]")
+        else:
+            console.print(Panel(
+                Syntax(selected_cmd, "bash", theme="monokai"),
+                title="[bold yellow]Copy this command[/bold yellow]",
+                border_style="yellow",
+            ))
+    else:
+        console.print("[dim]Cancelled.[/dim]")
+
+
 # ── recall ────────────────────────────────────────────────────────
 def cmd_recall(args: argparse.Namespace) -> int:
-    data = _request("GET", "/v1/recall", params={"query": args.query, "limit": args.limit})
+    params: dict[str, str | int | bool] = {
+        "query": args.query,
+        "limit": args.limit,
+    }
+
+    if args.cwd:
+        if args.cwd is True:
+            import os
+            params["cwd"] = os.getcwd()
+        else:
+            params["cwd"] = str(args.cwd)
+    if args.project:
+        root = _detect_project_root()
+        if root:
+            params["project_root"] = root
+    if args.category:
+        params["category"] = args.category
+    if args.failures_only:
+        params["failures_only"] = True
+    if args.since:
+        params["since"] = args.since
+
+    data = _request("GET", "/v1/recall", params=params)
 
     if args.json:
         print(json.dumps(data, indent=2))
@@ -114,7 +255,7 @@ def cmd_recall(args: argparse.Namespace) -> int:
         if answer:
             console.print()
             console.print(Panel(
-                answer,
+                Markdown(answer),
                 title="[bold cyan]Synthesis[/bold cyan]",
                 border_style="cyan",
                 padding=(1, 2),
@@ -129,27 +270,34 @@ def cmd_recall(args: argparse.Namespace) -> int:
             table.add_column("Timestamp", style="cyan", no_wrap=True)
             table.add_column("Category", style="yellow")
             table.add_column("Command", style="bold white")
-            table.add_column("Summary", style="dim white", max_width=55)
+            table.add_column("Summary", style="dim white", max_width=45)
+            table.add_column("Resolved?", justify="center")
             table.add_column("Score", justify="right")
             for item in results:
                 score = float(item.get("score", 0))
                 score_text = Text(f"{score:.2f}", style=_score_style(score))
+                resolved = item.get("was_resolved")
+                resolved_text = "✓" if resolved else ""
+                resolved_style = "green" if resolved else "dim"
                 table.add_row(
                     _format_ts(item.get("timestamp")),
                     item.get("category", "—"),
-                    _truncate(item.get("command", ""), 40),
-                    _truncate(item.get("summary", ""), 55),
+                    _truncate(item.get("command", ""), 35),
+                    _truncate(item.get("summary", ""), 45),
+                    Text(resolved_text, style=resolved_style),
                     score_text,
                 )
             console.print()
             console.print(table)
         console.print()
+        if args.interactive:
+            _interactive_prompt(answer, results)
         return 0
 
     # ── default: clean conversational output ──────────────────────
     if answer:
         console.print()
-        console.print(_render_inline(answer))
+        console.print(Markdown(answer))
 
     if results:
         seen: set[str] = set()
@@ -158,8 +306,14 @@ def cmd_recall(args: argparse.Namespace) -> int:
             cmd = item.get("command", "")
             if cmd not in seen:
                 seen.add(cmd)
-                console.print(f"  [bold cyan]{cmd}[/bold cyan]")
+                label = cmd
+                if item.get("was_resolved"):
+                    label = f"✓ {cmd}"
+                console.print(f"  [bold cyan]{label}[/bold cyan]")
         console.print()
+
+    if args.interactive:
+        _interactive_prompt(answer, results)
 
     return 0
 
@@ -392,6 +546,12 @@ def build_parser() -> argparse.ArgumentParser:
     recall.add_argument("--limit", type=int, default=5)
     recall.add_argument("--verbose", "-v", action="store_true", help="Show full technical details (scores, timestamps, categories)")
     recall.add_argument("--json", action="store_true", help="Output raw JSON")
+    recall.add_argument("--cwd", nargs="?", const=True, default=None, help="Scope search to current directory (or a specific path)")
+    recall.add_argument("--project", action="store_true", help="Scope search to detected project root")
+    recall.add_argument("--category", help="Filter by command category (e.g. container, git-workflow, python-dev)")
+    recall.add_argument("--failures-only", action="store_true", dest="failures_only", help="Search only failed commands")
+    recall.add_argument("--since", help="Retrieve events within a timeframe (e.g. 1d, 4h, 30m)")
+    recall.add_argument("--interactive", "-i", action="store_true", help="Interactive mode: select/copy/run a command")
     recall.set_defaults(func=cmd_recall)
 
     weekly = subparsers.add_parser("weekly-report", help="Generate weekly operational report")

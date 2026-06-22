@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import re
 import sqlite3
 import threading
 from datetime import datetime, timedelta, timezone
@@ -20,6 +21,21 @@ def to_iso(dt: datetime) -> str:
 
 def parse_iso(value: str) -> datetime:
     return datetime.fromisoformat(value)
+
+
+_SINCE_PATTERN = re.compile(r"^(\d+)\s*(s|m|h|d|w)$")
+
+
+def parse_since_duration(value: str) -> datetime:
+    """Parse a duration string like '30m', '2h', '1d', '7d' into a UTC datetime cutoff."""
+    m = _SINCE_PATTERN.match(value.strip().lower())
+    if not m:
+        raise ValueError(f"Invalid duration format: {value!r} (expected e.g. 30m, 2h, 1d, 7d)")
+    amount = int(m.group(1))
+    unit = m.group(2)
+    mapping = {"s": "seconds", "m": "minutes", "h": "hours", "d": "days", "w": "weeks"}
+    kwargs = {mapping[unit]: amount}
+    return utc_now() - timedelta(**kwargs)
 
 
 def find_project_root(path: str) -> str:
@@ -94,17 +110,17 @@ class Store:
             try:
                 self.conn.execute("ALTER TABLE sessions ADD COLUMN project_root TEXT")
             except sqlite3.OperationalError:
-                pass  # Already exists
+                pass
             try:
                 self.conn.execute("ALTER TABLE events ADD COLUMN project_root TEXT")
             except sqlite3.OperationalError:
-                pass  # Already exists
+                pass
             try:
                 self.conn.execute(
                     "ALTER TABLE events ADD COLUMN root_cause_confidence TEXT"
                 )
             except sqlite3.OperationalError:
-                pass  # Already exists
+                pass
 
             self.conn.executescript(
                 """
@@ -123,9 +139,25 @@ class Store:
                 CREATE INDEX IF NOT EXISTS idx_events_session_id ON events(session_id);
                 CREATE INDEX IF NOT EXISTS idx_events_category ON events(category);
                 CREATE INDEX IF NOT EXISTS idx_events_captured_at ON events(captured_at);
+                CREATE INDEX IF NOT EXISTS idx_events_project_root ON events(project_root);
+                CREATE INDEX IF NOT EXISTS idx_events_cwd ON events(cwd);
+                CREATE INDEX IF NOT EXISTS idx_events_exit_code ON events(exit_code);
                 CREATE INDEX IF NOT EXISTS idx_failure_fixes_session_id ON failure_fixes(session_id);
+                CREATE INDEX IF NOT EXISTS idx_failure_fixes_failure_id ON failure_fixes(failure_event_id);
+                CREATE INDEX IF NOT EXISTS idx_failure_fixes_success_id ON failure_fixes(success_event_id);
                 """
             )
+
+            try:
+                self.conn.execute(
+                    "CREATE VIRTUAL TABLE IF NOT EXISTS events_fts USING fts5("
+                    "command, output, category, root_cause, "
+                    "tokenize='porter unicode61'"
+                    ")"
+                )
+            except sqlite3.OperationalError:
+                pass
+
             self.conn.commit()
 
     def _find_open_session(self, project_root: str, event_time: datetime) -> int | None:
@@ -224,6 +256,16 @@ class Store:
             )
             self.conn.commit()
             event_id = int(cursor.lastrowid)
+
+            try:
+                self.conn.execute(
+                    "INSERT OR IGNORE INTO events_fts (rowid, command, output, category, root_cause) "
+                    "VALUES (?, ?, ?, ?, ?)",
+                    (event_id, command, output, category, root_cause),
+                )
+            except sqlite3.OperationalError:
+                pass
+
             return event_id, session_id
 
     def recent_session_events(
@@ -357,6 +399,87 @@ class Store:
                 (like_query, like_query, like_query, like_query, limit),
             ).fetchall()
             return list(rows)
+
+    def search_events_fts5(
+        self,
+        query: str,
+        limit: int,
+        cwd: str | None = None,
+        project_root: str | None = None,
+        category: str | None = None,
+        failures_only: bool = False,
+        since: datetime | None = None,
+    ) -> list[sqlite3.Row]:
+        with self.lock:
+            fts_terms = " OR ".join(
+                f'"{t}"' if " " in t else t
+                for t in query.strip().split()
+                if t
+            )
+            if not fts_terms:
+                return []
+
+            sql = """
+                SELECT e.*, rank AS fts_rank
+                FROM events_fts
+                JOIN events e ON events_fts.rowid = e.id
+                WHERE events_fts MATCH ?
+            """
+            params: list[Any] = [fts_terms]
+
+            if cwd is not None:
+                sql += " AND e.cwd = ?"
+                params.append(cwd)
+            if project_root is not None:
+                sql += " AND e.project_root = ?"
+                params.append(project_root)
+            if category is not None:
+                sql += " AND e.category = ?"
+                params.append(category)
+            if failures_only:
+                sql += " AND e.exit_code != 0"
+            if since is not None:
+                sql += " AND e.captured_at >= ?"
+                params.append(to_iso(since))
+
+            sql += " ORDER BY rank LIMIT ?"
+            params.append(limit)
+
+            try:
+                rows = self.conn.execute(sql, params).fetchall()
+                return list(rows)
+            except sqlite3.OperationalError:
+                return []
+
+    def get_fix_by_failure_id(self, failure_event_id: int) -> sqlite3.Row | None:
+        with self.lock:
+            return self.conn.execute(
+                """
+                SELECT f.*, e.command AS failure_command, e.output AS failure_output,
+                       s.command AS success_command
+                FROM failure_fixes f
+                JOIN events e ON f.failure_event_id = e.id
+                JOIN events s ON f.success_event_id = s.id
+                WHERE f.failure_event_id = ?
+                LIMIT 1
+                """,
+                (failure_event_id,),
+            ).fetchone()
+
+    def get_fix_by_success_id(self, success_event_id: int) -> sqlite3.Row | None:
+        with self.lock:
+            return self.conn.execute(
+                """
+                SELECT f.*, e.command AS failure_command, e.output AS failure_output,
+                       s.command AS success_command
+                FROM failure_fixes f
+                JOIN events e ON f.failure_event_id = e.id
+                JOIN events s ON f.success_event_id = s.id
+                WHERE f.success_event_id = ?
+                LIMIT 1
+                """,
+                (success_event_id,),
+            ).fetchone()
 
     def get_session(self, session_id: int) -> sqlite3.Row | None:
         with self.lock:

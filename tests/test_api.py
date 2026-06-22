@@ -162,6 +162,63 @@ class TestIngestPipeline:
         assert fix["summary"].startswith("Recovered command")
 
 
+class TestRecallFilters:
+    """Test the new recall filter parameters."""
+
+    def test_recall_filter_category(self, client: TestClient) -> None:
+        client.post("/v1/events", json={"command": "docker ps", "output": "", "exit_code": 0, "cwd": "/tmp"})
+        client.post("/v1/events", json={"command": "git status", "output": "", "exit_code": 0, "cwd": "/tmp"})
+
+        resp = client.get("/v1/recall", params={"query": "docker", "category": "container"})
+        assert resp.status_code == 200
+        results = resp.json()["results"]
+        for r in results:
+            assert r["category"] == "container"
+
+    def test_recall_filter_failures_only(self, client: TestClient) -> None:
+        client.post("/v1/events", json={"command": "make build", "output": "error", "exit_code": 1, "cwd": "/tmp"})
+        client.post("/v1/events", json={"command": "make build", "output": "ok", "exit_code": 0, "cwd": "/tmp"})
+
+        resp = client.get("/v1/recall", params={"query": "make", "failures_only": "true"})
+        assert resp.status_code == 200
+        results = resp.json()["results"]
+        for r in results:
+            event = _app_main.store.get_event(r["event_id"])
+            assert event["exit_code"] != 0
+
+    def test_recall_filter_since(self, client: TestClient) -> None:
+        client.post("/v1/events", json={"command": "echo old", "output": "", "exit_code": 0, "cwd": "/tmp"})
+
+        resp = client.get("/v1/recall", params={"query": "echo", "since": "1s"})
+        assert resp.status_code == 200
+
+    def test_recall_invalid_since_returns_400(self, client: TestClient) -> None:
+        resp = client.get("/v1/recall", params={"query": "test", "since": "invalid"})
+        assert resp.status_code == 400
+
+    def test_recall_resolution_chain_in_response(self, client: TestClient) -> None:
+        # Ingest failure
+        client.post("/v1/events", json={
+            "command": "python -m nonexistent_module",
+            "output": "ModuleNotFoundError: No module named 'nonexistent_module'",
+            "exit_code": 1,
+            "cwd": "/tmp",
+        })
+        # Ingest fix
+        client.post("/v1/events", json={
+            "command": "python -m nonexistent_module",
+            "output": "Module works!",
+            "exit_code": 0,
+            "cwd": "/tmp",
+        })
+
+        resp = client.get("/v1/recall", params={"query": "nonexistent_module"})
+        assert resp.status_code == 200
+        results = resp.json()["results"]
+        resolved = [r for r in results if r.get("was_resolved")]
+        assert len(resolved) >= 1, "Expected at least one event with resolution chain"
+
+
 class TestHealthEndpoint:
     def test_health(self, client: TestClient) -> None:
         resp = client.get("/health")

@@ -9,8 +9,9 @@ from __future__ import annotations
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
+import pytest
 
-from app.db import Store, find_project_root, to_iso, parse_iso, utc_now
+from app.db import Store, find_project_root, to_iso, parse_iso, parse_since_duration, utc_now
 
 
 # ---------------------------------------------------------------------------
@@ -311,6 +312,111 @@ class TestSearchEventsLike:
             _add(store, command=f"git cmd{i}", event_time=_ts(i))
         results = store.search_events_like("git", limit=3)
         assert len(results) == 3
+
+
+# ---------------------------------------------------------------------------
+# parse_since_duration
+# ---------------------------------------------------------------------------
+class TestParseSinceDuration:
+    def test_parses_minutes(self) -> None:
+        cutoff = parse_since_duration("30m")
+        assert (utc_now() - cutoff).total_seconds() == pytest.approx(1800, abs=5)
+
+    def test_parses_hours(self) -> None:
+        cutoff = parse_since_duration("2h")
+        assert (utc_now() - cutoff).total_seconds() == pytest.approx(7200, abs=5)
+
+    def test_parses_days(self) -> None:
+        cutoff = parse_since_duration("7d")
+        assert (utc_now() - cutoff).total_seconds() == pytest.approx(604800, abs=5)
+
+    def test_parses_weeks(self) -> None:
+        cutoff = parse_since_duration("1w")
+        assert (utc_now() - cutoff).total_seconds() == pytest.approx(604800, abs=5)
+
+    def test_parses_seconds(self) -> None:
+        cutoff = parse_since_duration("45s")
+        assert (utc_now() - cutoff).total_seconds() == pytest.approx(45, abs=5)
+
+    def test_invalid_format_raises(self) -> None:
+        with pytest.raises(ValueError, match="Invalid duration"):
+            parse_since_duration("xyz")
+        with pytest.raises(ValueError, match="Invalid duration"):
+            parse_since_duration("1x")
+
+
+# ---------------------------------------------------------------------------
+# FTS5 search
+# ---------------------------------------------------------------------------
+class TestFts5Search:
+    def test_fts5_matches_command(self, store: Store) -> None:
+        _add(store, command="docker compose up", event_time=_ts(0))
+        _add(store, command="echo hello", event_time=_ts(1))
+        results = store.search_events_fts5("docker", limit=10)
+        assert len(results) >= 1
+        cmd = results[0]["command"] if results else ""
+        assert "docker" in cmd
+
+    def test_fts5_respects_limit(self, store: Store) -> None:
+        for i in range(5):
+            _add(store, command=f"git cmd{i}", event_time=_ts(i))
+        results = store.search_events_fts5("git", limit=2)
+        assert len(results) == 2
+
+    def test_fts5_filter_category(self, store: Store) -> None:
+        _add(store, command="docker ps", category="container", event_time=_ts(0))
+        _add(store, command="git status", category="git-workflow", event_time=_ts(1))
+        results = store.search_events_fts5("docker ps", limit=10, category="container")
+        assert len(results) == 1
+        assert results[0]["command"] == "docker ps"
+
+    def test_fts5_filter_failures_only(self, store: Store) -> None:
+        _add(store, command="make build", exit_code=1, event_time=_ts(0))
+        _add(store, command="make build", exit_code=0, event_time=_ts(1))
+        results = store.search_events_fts5("make", limit=10, failures_only=True)
+        assert len(results) == 1
+        assert results[0]["exit_code"] == 1
+
+    def test_fts5_filter_since(self, store: Store) -> None:
+        import datetime
+        now = utc_now()
+        old = now - datetime.timedelta(days=10)
+        _add(store, command="old command", event_time=old)
+        _add(store, command="new command", event_time=now)
+        since = now - datetime.timedelta(days=5)
+        results = store.search_events_fts5("command", limit=10, since=since)
+        assert len(results) == 1
+        assert results[0]["command"] == "new command"
+
+
+# ---------------------------------------------------------------------------
+# Failure-fix resolution lookup methods
+# ---------------------------------------------------------------------------
+class TestResolutionLookup:
+    def test_get_fix_by_failure_id(self, store: Store) -> None:
+        eid_fail, sid = _add(store, command="build", exit_code=1, event_time=_ts(0))
+        eid_fix, _ = _add(store, command="build", exit_code=0, event_time=_ts(5))
+        store.add_failure_fix(sid, eid_fail, eid_fix, "Fixed the build")
+
+        fix = store.get_fix_by_failure_id(eid_fail)
+        assert fix is not None
+        assert fix["success_event_id"] == eid_fix
+        assert fix["failure_command"] == "build"
+
+    def test_get_fix_by_success_id(self, store: Store) -> None:
+        eid_fail, sid = _add(store, command="build", exit_code=1, event_time=_ts(0))
+        eid_fix, _ = _add(store, command="build", exit_code=0, event_time=_ts(5))
+        store.add_failure_fix(sid, eid_fail, eid_fix, "Fixed the build")
+
+        fix = store.get_fix_by_success_id(eid_fix)
+        assert fix is not None
+        assert fix["failure_event_id"] == eid_fail
+
+    def test_get_fix_by_failure_id_none(self, store: Store) -> None:
+        assert store.get_fix_by_failure_id(999) is None
+
+    def test_get_fix_by_success_id_none(self, store: Store) -> None:
+        assert store.get_fix_by_success_id(999) is None
 
 
 # ---------------------------------------------------------------------------

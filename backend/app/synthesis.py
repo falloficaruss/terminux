@@ -43,6 +43,18 @@ class SynthesisEngine:
                 f"   Output: {item.summary}\n"
                 f"   Time: {item.timestamp.isoformat()}"
             )
+            if item.was_resolved:
+                part += (
+                    f"\n   [RESOLUTION] This event was part of a troubleshooting sequence."
+                )
+                if item.resolution_command:
+                    part += (
+                        f"\n   → Resolution Action: {item.resolution_command}"
+                    )
+                if item.resolution_summary:
+                    part += (
+                        f"\n   → Resolution Summary: {item.resolution_summary}"
+                    )
             context_parts.append(part)
 
         context = "\n\n".join(context_parts)
@@ -55,6 +67,12 @@ class SynthesisEngine:
             f"If NO item is clearly relevant, say:\n"
             f"I don't have any information about that in your terminal history.\n\n"
             f"Do NOT guess, do NOT fabricate information, do NOT connect unrelated context.\n\n"
+            f"When a [RESOLUTION] section is present, describe the full troubleshooting "
+            f"story: what failed, why, and what command fixed it.\n\n"
+            f"Format your answer in structured Markdown. Always end with:\n"
+            f"### Suggested Action\n"
+            f"```bash\n<command>\n```\n"
+            f"so that the CLI can parse and offer to run it.\n\n"
             f"Retrieved History:\n{context}\n\n"
             f"Answer:"
         )

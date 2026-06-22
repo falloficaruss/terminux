@@ -31,6 +31,9 @@ class RecallItem(BaseModel):
     command: str
     summary: str
     timestamp: datetime
+    resolution_command: str | None = None
+    resolution_summary: str | None = None
+    was_resolved: bool | None = None
 
 
 class RecallResponse(BaseModel):
