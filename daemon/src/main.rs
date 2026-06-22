@@ -324,6 +324,9 @@ fn send_raw_via_socket(json: &str) -> Result<(), String> {
 }
 
 fn send_event(payload: &EventPayload) -> Result<(), String> {
+    if env::var("TERMINUX_API_URL").is_ok() {
+        return post_event(payload);
+    }
     if send_via_socket(payload).is_ok() {
         return Ok(());
     }
