@@ -1,6 +1,30 @@
-## 1. Architectural Blueprint (Current State)
+# Terminux
 
-The project consists of three core components:
+**Your terminal remembers what you forget.**
+
+Terminux captures command history, failures, and recoveries from your shell, then lets you search and replay that memory with natural language — so the next time Docker blows up, you already know how you fixed it last time.
+
+```bash
+tm recall "why did docker fail last time?"
+tm preflight "deploy"
+tm weekly-report
+```
+
+---
+
+## Features
+
+- **Semantic recall** — Ask questions in plain English; hybrid vector + SQLite search finds the relevant failure and the fix you used before.
+- **Session reconstruction** — Replay full debugging timelines: failure → diagnosis → recovery, with exit codes and outcomes.
+- **Failure–recovery linking** — When a previously failing command succeeds, Terminux auto-links the fix for next time.
+- **Preflight warnings** — Get warned before re-running commands that historically broke things.
+- **Weekly analytics** — Category stats, failure rates, and recurring problem commands.
+- **Local-first & private** — Secrets are redacted before storage; SQLite + optional Qdrant stay on your machine.
+- **Passive capture** — Bash/Zsh hooks + Rust daemon ingest commands in the background.
+
+---
+
+## Architecture
 
 ```mermaid
 graph TD
@@ -12,66 +36,148 @@ graph TD
     G[CLI Tool: tm] -->|Query endpoints| C
 ```
 
-### Component Status Table
-
-| Component | Status | Key Features | Tech Stack |
-| :--- | :--- | :--- | :--- |
-| **FastAPI Backend** | **Solid V1** | Ingestion, session gap detection, semantic recall, SQLite + Qdrant sync. | Python, FastAPI, SQLite |
-| **CLI Tool (`tm`)** | **Solid V1** | Rich panels, formatted tables, subcommands for recall, reports, replay. | Python, `rich`, `httpx` |
-| **Capture Daemon** | **Partial V1** | CLI wrapper for manual/file ingestions. **No active passive watcher.** | Rust, `clap`, `reqwest` |
-| **Embedding Engine** | **Excellent** | Multi-backend fallback (Gemini → Ollama → Local SHA1 token hashing). | Python, `httpx`, `hashlib` |
-| **Redaction Layer** | **Good** | Regex-based scrubbing of AWS keys, database connection strings, JWTs, IPs. | Python, `re` |
+| Component | Role | Stack |
+| :--- | :--- | :--- |
+| **FastAPI Backend** | Ingestion, sessionization, recall, reports | Python, FastAPI, SQLite |
+| **CLI (`tm`)** | Recall, replay, preflight, weekly reports | Python, `rich`, `httpx` |
+| **Capture Daemon** | Background ingest from shell hooks / files | Rust, `clap`, `reqwest` |
+| **Embedding Engine** | Semantic index with multi-backend fallback | Gemini → Ollama → local hash |
+| **Redaction Layer** | Scrubs keys, JWTs, connection strings, IPs | Python regex |
 
 ---
 
-## 2. Core Strengths & Completed Milestones (V1)
+## Quick start
 
-Reviewing `PLAN.md` shows that the core of Phase 1 (V1) is highly functional:
-- **Intelligent Sessionizer**: `db.py` groups consecutive terminal commands into distinct logical sessions anchored around the inferred `project_root` (resolving `.git`, `Cargo.toml`, etc.) and a configurable time gap (e.g., 20 minutes).
-- **Failure-Recovery Tracking**: The system detects a failing command (exit code $\neq 0$), captures its `likely_root_cause` via stdout heuristics, and automatically registers a recovery link (`failure_fixes` table) when the same command subsequently succeeds.
-- **Hybrid Recall & Synthesis**: `/v1/recall` combines semantic vectors from Qdrant with classic SQLite `LIKE` fallbacks, feeding relevant context to the Gemini generative model to write a clean natural language answer to questions like `tm recall "why did docker fail last time?"`.
-- **Weekly Reporting**: Automatic aggregation of category stats, failure rates, and recurring failure commands.
+### Prerequisites
+
+- Python 3.11+
+- Rust toolchain (for the daemon)
+- Optional: [Qdrant](https://qdrant.tech/) for vector search
+- Optional: Gemini API key for better embeddings and natural-language answers
+
+### 1. Configure
+
+```bash
+cp .env.example .env
+# Edit .env — set TERMINUX_GEMINI_API_KEY if you have one
+```
+
+### 2. Backend
+
+```bash
+cd backend
+pip install -r requirements.txt
+uvicorn app.main:app --host 127.0.0.1 --port 8000
+```
+
+### 3. CLI
+
+```bash
+# From repo root — ensure tm is on your PATH, or invoke with ./tm
+export TERMINUX_API_URL=http://127.0.0.1:8000
+./tm status
+```
+
+### 4. Shell hooks (passive capture)
+
+```bash
+# Bash
+./scripts/install_bash_hook.sh
+
+# Zsh
+./scripts/install_zsh_hook.sh
+```
+
+Restart your shell, then build and run the daemon:
+
+```bash
+cd daemon && cargo build --release
+./target/release/terminux-daemon daemon
+```
+
+### 5. Manual ingest (no hooks)
+
+```bash
+./tm ingest --command "docker compose up" --exit-code 1 --output "port already allocated"
+```
 
 ---
 
-## 3. Discovered Gaps & Technical Opportunities
+## CLI reference
 
-### A. The Capture Daemon is Missing Shell Hooks
-> [!IMPORTANT]
-> The largest architectural gap is the **lack of automated shell interception**. Right now, commands must be manually ingested via `tm ingest` or `daemon`. Passive observation (the primary value proposition of Terminux) is not yet active.
+| Command | Description |
+| :--- | :--- |
+| `tm recall "<query>"` | Semantic search over past failures and fixes |
+| `tm replay-session --query "<q>"` | Timeline of a captured debugging session |
+| `tm preflight "<command>"` | Warn if this command historically failed |
+| `tm weekly-report` | Operational stats for the past week |
+| `tm correct <id> --category <cat>` | Fix a misclassified event |
+| `tm ingest ...` | Manually send an event to the API |
+| `tm status` | Backend health and model config |
 
-### B. Regex Classifier Ambiguity & False Positives
-`tests/test_classifier.py` contains documented edge cases of the regex classifier:
-- `compose` alone matches `container` (e.g. `compose an email` is classified as `container`).
-- `uv` alone matches `python-dev` (e.g. `check uv levels` matches `python-dev`).
-- `token` matches `auth` anywhere in a command or output (e.g., `echo token_name` becomes `auth`).
+Examples:
 
-### C. Secret Redaction Completeness
-Though we have 8 strong regex patterns (IPs, AWS keys, JWTs, database strings), we don't yet capture:
-- Private SSH keys (`-----BEGIN OPENSSH PRIVATE KEY-----`).
-- Slack/Discord webhook URLs.
-- Generic config values matching `password = ...` with multiline blocks.
-
-### D. User Feedback Loop for Corrections (V1.5 Goal)
-The system classifies events automatically, but has no command for the user to override or correct a misclassification (e.g. fixing a `compose an email` event to be `general` instead of `container`).
+```bash
+tm recall "docker port conflict"
+tm replay-session --query "nvidia"
+tm preflight "deploy"
+tm weekly-report
+tm correct 42 --category general
+```
 
 ---
 
-## 4. Proposed Next Steps Plan
+## Configuration
 
-To systematically advance Terminux, we suggest prioritizing the roadmap into three distinct phases:
+See [`.env.example`](.env.example). Key variables:
 
-### Phase A: Shell Hooking & Automation (Highly Recommended Immediate Step)
-1. **Develop Shell Hooks**: Write shell scripts (for Bash/Zsh) that leverage shell hooks (`PROMPT_COMMAND` in Bash, `preexec`/`precmd` in Zsh) to capture commands, execution duration, and exit codes.
-2. **Daemon Enhancement**: Update the Rust daemon to passively receive background signals from these shell hooks, tail the terminal output buffers, and automatically post the details asynchronously to the FastAPI backend.
+| Variable | Default | Purpose |
+| :--- | :--- | :--- |
+| `TERMINUX_API_URL` | `http://127.0.0.1:8000` | Backend URL for CLI / daemon |
+| `TERMINUX_GEMINI_API_KEY` | — | Embeddings + answer synthesis |
+| `TERMINUX_EMBEDDING_BACKEND` | `gemini` | `gemini` or `hash` |
+| `TERMINUX_QDRANT_ENABLED` | `true` | Enable vector store |
+| `TERMINUX_QDRANT_URL` | `http://127.0.0.1:6333` | Qdrant endpoint |
+| `TERMINUX_SESSION_GAP_SECONDS` | `1200` | Idle gap that starts a new session |
+| `TERMINUX_SQLITE_PATH` | `./backend/data/terminux.db` | Local event store |
 
-### Phase B: Strengthen Classifier & Secret Redaction (Low-Hanging Fruit)
-1. **Refine Classifier Regular Expressions**:
-   - Upgrade `classifier.py` to use stricter word boundaries (e.g., `\buv\b` is good, but check surrounding tokens to ensure it isn't `uv index` or `uv rays`).
-   - Add negative lookaheads/lookbehinds to category matching.
-2. **Expand Redaction Patterns**: Add SSH key headers and webhooks, and cover common config patterns to guarantee local-first safety.
+---
 
-### Phase C: Implementing User Feedback Loop & Memory Correction (V1.5 Milestones)
-1. **API Support for Memory Correction**: Add a `/v1/events/{id}/correction` endpoint to update database records and Qdrant payloads with corrected categories or root causes.
-2. **CLI Integration**: Implement `tm correct <event_id> --category <new_category>` to easily fix any automated misclassifications.
-3. **Confidence Scoring**: Add a lightweight confidence model/heuristics rating to inferred root causes (e.g., `confidence: High` for exact matching errors like `ModuleNotFoundError`).
+## How it works
+
+1. **Capture** — Shell hooks (or `tm ingest`) send command, cwd, exit code, and truncated output to the daemon → API.
+2. **Redact & classify** — Secrets are stripped; events are categorized and root-cause hints extracted from stderr/stdout.
+3. **Sessionize** — Commands are grouped by project root and time gap into logical sessions.
+4. **Index** — Metadata lands in SQLite; embeddings go to Qdrant (when enabled).
+5. **Recall** — Queries fuse vector similarity with SQL fallbacks, then optionally synthesize a natural-language answer via Gemini.
+6. **Recover** — A later success of a previously failing command is linked as the fix.
+
+---
+
+## Development
+
+```bash
+# Backend tests
+pip install -r backend/requirements.txt pytest
+pytest tests/
+
+# Daemon
+cd daemon && cargo test
+```
+
+Project layout:
+
+```
+terminux/
+├── backend/app/     # FastAPI API, DB, embeddings, redaction
+├── daemon/          # Rust capture agent
+├── scripts/         # Bash/Zsh hook installers
+├── tests/           # Pytest suite
+└── tm               # CLI entrypoint
+```
+
+---
+
+## License
+
+See repository for license details.
